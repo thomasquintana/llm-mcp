@@ -1,0 +1,9 @@
+/target/
+*.profraw
+.env
+.env.*
+!.env.example
+auth.json
+credentials.json
+*.lock.tmp
+.DS_Store
