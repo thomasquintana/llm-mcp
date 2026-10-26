@@ -1,0 +1,13 @@
+services:
+  llm-mcp:
+    image: ghcr.io/thomasquintana/llm-mcp:0.1.0
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      LLM_MCP_GENERATE_AUTH: api_key
+      LLM_MCP_ALLOWED_HOSTS: localhost,127.0.0.1,llm-mcp
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 135s

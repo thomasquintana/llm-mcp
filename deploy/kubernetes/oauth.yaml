@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llm-mcp-oauth
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-mcp-oauth
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: llm-mcp-oauth}
+  template:
+    metadata:
+      labels: {app: llm-mcp-oauth}
+    spec:
+      terminationGracePeriodSeconds: 140
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: llm-mcp
+          image: ghcr.io/thomasquintana/llm-mcp:0.1.0
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: llm-mcp-openai, key: api-key}
+            - {name: LLM_MCP_TRANSPORT, value: http}
+            - {name: LLM_MCP_BIND, value: "0.0.0.0:8080"}
+            - {name: LLM_MCP_GENERATE_AUTH, value: oauth}
+            - {name: LLM_MCP_OAUTH_CREDENTIALS_PATH, value: /state/auth.json}
+            - {name: LLM_MCP_ALLOWED_HOSTS, value: "llm-mcp-oauth,llm-mcp-oauth.default,llm-mcp-oauth.default.svc,llm-mcp-oauth.default.svc.cluster.local,localhost,127.0.0.1"}
+          volumeMounts: [{name: oauth-state, mountPath: /state}]
+          startupProbe:
+            httpGet: {path: /health/live, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: oauth-state
+          persistentVolumeClaim: {claimName: llm-mcp-oauth}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-mcp-oauth
+spec:
+  selector: {app: llm-mcp-oauth}
+  sessionAffinity: ClientIP
+  ports: [{name: http, port: 8080, targetPort: http}]

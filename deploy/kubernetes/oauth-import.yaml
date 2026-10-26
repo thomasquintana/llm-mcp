@@ -1,0 +1,39 @@
+# Apply after the PVC exists and while the OAuth Deployment has zero replicas.
+# The transfer Secret key auth.json must contain the trusted source credential JSON.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llm-mcp-oauth-import
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: import
+          image: ghcr.io/thomasquintana/llm-mcp:0.1.0
+          command: [/bin/sh, -ec]
+          args:
+            - "umask 077; trap 'rm -f /state/import.json' EXIT; cp /transfer/auth.json /state/import.json; llm-mcp auth import /state/import.json"
+          env: [{name: LLM_MCP_OAUTH_CREDENTIALS_PATH, value: /state/auth.json}]
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: transfer, mountPath: /transfer, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      volumes:
+        - name: state
+          persistentVolumeClaim: {claimName: llm-mcp-oauth}
+        - name: transfer
+          secret:
+            secretName: llm-mcp-oauth-transfer
+            defaultMode: 0440

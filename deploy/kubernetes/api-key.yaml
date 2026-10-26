@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-mcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: llm-mcp}
+  template:
+    metadata:
+      labels: {app: llm-mcp}
+    spec:
+      terminationGracePeriodSeconds: 140
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: llm-mcp
+          image: ghcr.io/thomasquintana/llm-mcp:0.1.0
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: llm-mcp-openai, key: api-key}
+            - {name: LLM_MCP_TRANSPORT, value: http}
+            - {name: LLM_MCP_BIND, value: "0.0.0.0:8080"}
+            - {name: LLM_MCP_GENERATE_AUTH, value: api_key}
+            - {name: LLM_MCP_ALLOWED_HOSTS, value: "llm-mcp,llm-mcp.default,llm-mcp.default.svc,llm-mcp.default.svc.cluster.local,localhost,127.0.0.1"}
+          startupProbe:
+            httpGet: {path: /health/live, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 100m, memory: 64Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-mcp
+spec:
+  selector: {app: llm-mcp}
+  sessionAffinity: ClientIP
+  ports: [{name: http, port: 8080, targetPort: http}]
