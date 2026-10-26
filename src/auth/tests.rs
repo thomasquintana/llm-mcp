@@ -128,9 +128,12 @@ async fn callback_state_is_bound_and_rejected_attempt_does_not_consume_login() {
 
 #[tokio::test]
 async fn validates_rsa_signature_issuer_audience_nonce_expiry_and_subject() {
-    use rsa::{RsaPrivateKey, pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
-    let key = RsaPrivateKey::new(&mut rand08::rngs::OsRng, 2048).unwrap();
-    let jwks = json!({"keys":[{"kty":"RSA","kid":"test","alg":"RS256","use":"sig","n":URL_SAFE_NO_PAD.encode(key.n().to_bytes_be()),"e":URL_SAFE_NO_PAD.encode(key.e().to_bytes_be())}]});
+    use aws_lc_rs::{
+        rsa::{KeyPair, KeySize},
+        signature::KeyPair as _,
+    };
+    let key = KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let jwks = json!({"keys":[{"kty":"RSA","kid":"test","alg":"RS256","use":"sig","n":URL_SAFE_NO_PAD.encode(key.public_key().modulus().big_endian_without_leading_zero()),"e":URL_SAFE_NO_PAD.encode(key.public_key().exponent().big_endian_without_leading_zero())}]});
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/jwks", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
@@ -151,12 +154,23 @@ async fn validates_rsa_signature_issuer_audience_nonce_expiry_and_subject() {
         jwks: url,
         ..Endpoints::default()
     };
-    let encoding = jsonwebtoken::EncodingKey::from_rsa_der(key.to_pkcs1_der().unwrap().as_bytes());
-    let mut header = jsonwebtoken::Header::new(Algorithm::RS256);
-    header.kid = Some("test".into());
+    let sign = |claims: &Value| {
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"test"}"#);
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).unwrap());
+        let message = format!("{header}.{payload}");
+        let mut signature = vec![0; key.public_modulus_len()];
+        key.sign(
+            &aws_lc_rs::signature::RSA_PKCS1_SHA256,
+            &aws_lc_rs::rand::SystemRandom::new(),
+            message.as_bytes(),
+            &mut signature,
+        )
+        .unwrap();
+        format!("{message}.{}", URL_SAFE_NO_PAD.encode(signature))
+    };
     let claims =
         json!({"iss":ISSUER,"aud":"oaiapp_test","exp":now()+3600,"sub":"user","nonce":"expected"});
-    let token = jsonwebtoken::encode(&header, &claims, &encoding).unwrap();
+    let token = sign(&claims);
     assert_eq!(
         validate_id_token(
             &Client::new(),
@@ -179,7 +193,7 @@ async fn validates_rsa_signature_issuer_audience_nonce_expiry_and_subject() {
     ] {
         let mut invalid = claims.clone();
         invalid[field] = bad;
-        let token = jsonwebtoken::encode(&header, &invalid, &encoding).unwrap();
+        let token = sign(&invalid);
         assert!(
             validate_id_token(
                 &Client::new(),
@@ -208,6 +222,63 @@ async fn validates_rsa_signature_issuer_audience_nonce_expiry_and_subject() {
         )
         .await
         .is_err()
+    );
+    for field in ["iss", "aud", "exp", "sub", "nonce"] {
+        let mut missing = claims.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            validate_id_token(
+                &Client::new(),
+                &endpoints,
+                &sign(&missing),
+                "oaiapp_test",
+                Some("expected")
+            )
+            .await
+            .is_err()
+        );
+    }
+    let (message, signature) = token.rsplit_once('.').unwrap();
+    let corrupt = format!(
+        "{message}.{}{}",
+        if signature.starts_with('A') { 'B' } else { 'A' },
+        &signature[1..]
+    );
+    assert!(
+        validate_id_token(
+            &Client::new(),
+            &endpoints,
+            &corrupt,
+            "oaiapp_test",
+            Some("expected")
+        )
+        .await
+        .is_err()
+    );
+    let mut multiple = claims.clone();
+    multiple["aud"] = json!(["oaiapp_test", "other"]);
+    assert!(
+        validate_id_token(
+            &Client::new(),
+            &endpoints,
+            &sign(&multiple),
+            "oaiapp_test",
+            Some("expected")
+        )
+        .await
+        .is_err()
+    );
+    multiple["azp"] = json!("oaiapp_test");
+    assert!(
+        validate_id_token(
+            &Client::new(),
+            &endpoints,
+            &sign(&multiple),
+            "oaiapp_test",
+            Some("expected")
+        )
+        .await
+        .is_ok()
     );
     task.abort();
 }

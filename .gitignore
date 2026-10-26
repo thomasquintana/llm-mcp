@@ -7,3 +7,6 @@ auth.json
 credentials.json
 *.lock.tmp
 .DS_Store
+__pycache__/
+.ruff_cache/
+/dist/

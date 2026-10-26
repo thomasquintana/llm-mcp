@@ -1,0 +1,85 @@
+name: Checks
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy,llvm-tools-preview
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --all-features --locked
+      - run: cargo doc --all-features --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rustdoc-${{ runner.os }}-${{ github.sha }}
+          path: target/doc
+          retention-days: 30
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install stable --profile minimal
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+      - run: cargo install cargo-deny --version 0.20.2 --locked && cargo install cargo-about --version 0.9.2 --locked
+      - run: cargo deny check
+      - run: python3 tools/check_notices.py
+      - run: python3 tools/export_catalogs.py --check
+      - run: uv run --with-requirements tools/requirements.txt ruff check tools
+      - run: uv run --with-requirements tools/requirements.txt python -m unittest discover -s tools -p 'test_*.py'
+      - name: Verify clean packaging in fresh storage
+        run: cargo package --locked --target-dir "$(mktemp -d)"
+      - name: Obtain pinned workflow analyzer
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.7.12 --repo rhysd/actionlint --pattern actionlint_1.7.12_linux_amd64.tar.gz --pattern actionlint_1.7.12_checksums.txt
+          sha256sum --check --ignore-missing actionlint_1.7.12_checksums.txt
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+      - name: Workflow static analysis
+        run: '"$RUNNER_TEMP/actionlint"'
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate Kubernetes schemas
+        run: docker run --rm -v "$PWD/deploy/kubernetes:/manifests:ro" ghcr.io/yannh/kubeconform:v0.7.0@sha256:85dbef6b4b312b99133decc9c6fc9495e9fc5f92293d4ff3b7e1b30f5611823c -strict -summary /manifests
+      - run: docker compose -f deploy/compose/api-key.yaml config --quiet && docker compose -f deploy/compose/oauth.yaml config --quiet
+        env:
+          OPENAI_API_KEY: validation-only
+      - run: docker build -t llm-mcp:ci .
+      - run: python3 tools/container_smoke.py --image llm-mcp:ci
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - run: cargo llvm-cov --all-features --locked --lcov --output-path target/lcov.info --fail-under-lines 70
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: coverage-${{ github.sha }}
+          path: target/lcov.info
+          if-no-files-found: error

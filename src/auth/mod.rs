@@ -72,7 +72,10 @@ struct TokenResponse {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Claims {
+    iss: String,
     sub: String,
+    aud: serde_json::Value,
+    azp: Option<String>,
     nonce: Option<String>,
     email: Option<String>,
 }
@@ -111,14 +114,23 @@ async fn validate_id_token(
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_issuer(&[ISSUER]);
     validation.set_audience(&[client_id]);
+    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
     validation.leeway = 30;
     let claims = decode::<Claims>(token, &key, &validation)
         .map_err(|_| {
             auth_error("ID token signature, issuer, audience or expiry validation failed")
         })?
         .claims;
-    if claims.sub.is_empty() || nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n)) {
+    if claims.iss != ISSUER
+        || claims.sub.is_empty()
+        || nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n))
+    {
         return Err(auth_error("ID token identity or nonce mismatch"));
+    }
+    if (claims.azp.is_some() || claims.aud.as_array().is_some_and(|a| a.len() > 1))
+        && claims.azp.as_deref() != Some(client_id)
+    {
+        return Err(auth_error("ID token authorized party mismatch"));
     }
     Ok(claims)
 }

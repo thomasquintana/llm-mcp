@@ -2,6 +2,7 @@
 name = "llm-mcp"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.98"
 license = "Apache-2.0"
 repository = "https://github.com/thomasquintana/llm-mcp"
 description = "Stateless OpenAI generation and decisions tools over MCP"
@@ -14,8 +15,7 @@ exclude = [".opencode/", "deploy/", ".github/"]
 axum = "0.8"
 base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
-futures-util = "0.3"
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "form"] }
 rmcp = { version = "3.7", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
@@ -32,9 +32,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-rand08 = { package = "rand", version = "0.8" }
-rsa = { version = "0.9", features = ["pem"] }
-
+aws-lc-rs = "1.18"
 
 [lints.rust]
 missing_docs = "warn"

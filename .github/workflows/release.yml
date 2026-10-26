@@ -1,0 +1,156 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and validate without publishing
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            python3 tools/release.py validate --ref "$RELEASE_REF" --dry-run
+          else
+            python3 tools/release.py validate --ref "$RELEASE_REF"
+          fi
+  checks:
+    needs: metadata
+    uses: ./.github/workflows/checks.yml
+  binaries:
+    needs: [metadata, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, arch: amd64, linux: true}
+          - {os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, arch: arm64, linux: true}
+          - {os: macos-14, target: aarch64-apple-darwin, linux: false}
+          - {os: macos-15-intel, target: x86_64-apple-darwin, linux: false}
+          - {os: windows-latest, target: x86_64-pc-windows-msvc, linux: false}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build native Linux image and export identical binary
+        if: matrix.linux
+        run: |
+          docker build --label "org.opencontainers.image.version=$VERSION" --label "org.opencontainers.image.revision=$GITHUB_SHA" -t llm-mcp:release .
+          python3 tools/container_smoke.py --image llm-mcp:release
+          docker build --target export --output type=local,dest=dist/bin .
+          docker save llm-mcp:release -o "dist/image-$ARCH.tar"
+          python3 tools/release.py archive --binary dist/bin/llm-mcp --target "$TARGET"
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+      - name: Build and test native macOS or Windows binary
+        if: ${{ !matrix.linux }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo test --all-features --locked
+          cargo build --release --locked
+          executable=target/release/llm-mcp
+          if [ "$RUNNER_OS" = Windows ]; then executable="$executable.exe"; fi
+          "$executable" --version
+          python3 tools/release.py archive --binary "$executable" --target "$TARGET"
+        env:
+          TARGET: ${{ matrix.target }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: matrix.linux
+        with:
+          name: images-${{ matrix.arch }}
+          path: dist/image-*.tar
+          if-no-files-found: error
+          retention-days: 7
+  crate:
+    needs: [metadata, checks, binaries]
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install stable --profile minimal
+      - id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - run: python3 tools/release.py publish-crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+  image:
+    needs: [metadata, checks, binaries]
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: releases
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: images-*
+          path: dist
+          merge-multiple: true
+      - name: Authenticate to GHCR
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GH_USER" --password-stdin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_USER: ${{ github.actor }}
+      - run: python3 tools/publish_image.py
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+  finalize:
+    needs: [metadata, crate, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: releases
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+      - run: python3 tools/release.py github
+        env:
+          GH_TOKEN: ${{ github.token }}

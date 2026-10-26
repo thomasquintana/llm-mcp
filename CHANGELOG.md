@@ -9,3 +9,5 @@ All notable changes follow Semantic Versioning.
 - Add OpenAI browser OAuth, protected credential import/rotation and internal SSE completion handling.
 - Serve stdio and Streamable HTTP with cancellation/health endpoints and verified HTLK catalogs/workflows.
 - Add a standalone nonroot container, Compose examples and Kubernetes API-key/OAuth deployments.
+- Add cross-platform CI, dependency/license gates, coverage and automated crate/binary/container release workflows.
+- Use AWS-LC for JWT validation and require issuer, audience, subject and expiry claims.
