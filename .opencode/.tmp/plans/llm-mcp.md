@@ -32,7 +32,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 4. Establish executable static-analysis/regression commands and bootstrap test.
 5. Run gates, review status/diff/history, update this plan, commit foundation.
 
-## Task 2 — request/config/provider/tools [IN PROGRESS]
+## Task 2 — request/config/provider/tools [COMPLETE]
 
 1. Parse environment settings without mutating global environment in tests. Validate positive limits and explicit auth, redact secrets. Request model is caller supplied.
 2. Implement bounded reqwest API-key HTTP calls, pass-through bodies, raw object responses, provider status/error mapping, no retries/redirects, org/project headers.
@@ -41,7 +41,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 5. Mock-provider tests: unknown fields, full history, function call output, schema settings, refusal batches, HTTP auth/headers, rate limits/timeouts/malformed/oversized bodies and option rejection before dispatch.
 6. Run gates, update plan, commit.
 
-## Task 3 — OAuth lifecycle [PENDING]
+## Task 3 — OAuth lifecycle [IN PROGRESS]
 
 1. Implement protected credential records and host identity, atomic rotation, exclusive process ownership and safe import/logout/status.
 2. Implement documented OpenAI dynamic OSS registration and PKCE loopback login, browser URL, state/nonce validation, OIDC discovery/JWKS signature/issuer/audience/expiry validation, explicit granted scopes and token exchange.
@@ -95,3 +95,4 @@ Additional policy/deployment/workflow checks are added as their artifacts are in
 - htlk research: exact MCP 2025-11-25, required outputSchema and object structuredContent, descriptor digests include descriptions/annotations. Protocol descriptors must remain deterministic. htlk raw JSON has safe-number/size constraints and no success text fallback.
 - Release research: htlk baseline has strong Rust/package/license gates but binary/container delivery must be added. Never publish just because release workflow is implemented.
 - Task 1 complete: git initialized on main; specification/package/toolchain/license added. Format, Clippy, regression test, warning-free rustdoc and verified Cargo packaging all passed. Plan reviewed before foundation commit.
+- Task 2 complete: environment parser, bounded provider calls and MCP descriptors/handlers implemented. Nine regression tests pass (identity plus eight provider/config tests), including malformed JSON, size bounds, cancel/deadline, exact history/options/response preservation and background/stream rejection before dispatch. Format, Clippy, rustdoc and package verification passed. OAuth dispatch remains intentionally implemented in Task 3; transport wiring in Task 4.

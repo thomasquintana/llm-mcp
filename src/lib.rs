@@ -1,5 +1,10 @@
 //! Stateless OpenAI generation and classification over the Model Context Protocol.
 
+pub mod config;
+pub mod error;
+pub mod mcp;
+pub mod provider;
+
 /// The package version used in MCP server identity and catalogs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
