@@ -5,6 +5,12 @@
 !.env.example
 auth.json
 credentials.json
+auth.pending.json
+auth.host.json
+auth.lock
+credentials.pending.json
+credentials.host.json
+credentials.lock
 *.lock.tmp
 .DS_Store
 __pycache__/

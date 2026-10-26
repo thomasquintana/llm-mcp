@@ -87,6 +87,7 @@ access; see [login, refresh and remote deployment](docs/oauth.md).
 - [Specification](docs/specification.md)
 - [Development checks](CONTRIBUTING.md)
 - [Publishing and binary/container releases](docs/releases.md)
+- [Acceptance evidence and verification boundaries](docs/verification.md)
 
 MCP protocol compatibility is pinned to **2025-11-25** for HTLK. Export descriptors
 using `llm-mcp catalog`, or HTLK inputs using `llm-mcp catalog --htlk`.

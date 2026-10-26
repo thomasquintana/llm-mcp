@@ -1,6 +1,8 @@
 //! OpenAI Sign in with ChatGPT lifecycle and rotating credential ownership.
 
 mod store;
+#[cfg(windows)]
+mod windows;
 
 use crate::{
     error::{Error, Result},
@@ -18,14 +20,18 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
-use store::{Credentials, Store};
+use store::{Credentials, PendingRotation, Store};
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, oneshot},
+    sync::{Mutex, oneshot, watch},
 };
+use tokio_util::task::TaskTracker;
 use url::Url;
 
 const ISSUER: &str = "https://auth.openai.com";
@@ -76,6 +82,7 @@ struct Claims {
     sub: String,
     aud: serde_json::Value,
     azp: Option<String>,
+    exp: u64,
     nonce: Option<String>,
     email: Option<String>,
 }
@@ -86,6 +93,17 @@ async fn validate_id_token(
     token: &str,
     client_id: &str,
     nonce: Option<&str>,
+) -> Result<Claims> {
+    validate_id_token_at(client, endpoints, token, client_id, nonce, None).await
+}
+
+async fn validate_id_token_at(
+    client: &Client,
+    endpoints: &Endpoints,
+    token: &str,
+    client_id: &str,
+    nonce: Option<&str>,
+    received_at: Option<u64>,
 ) -> Result<Claims> {
     let header = decode_header(token).map_err(|_| auth_error("invalid ID token header"))?;
     if header.alg != Algorithm::RS256 {
@@ -98,7 +116,7 @@ async fn validate_id_token(
         .await
         .map_err(Error::transport)?;
     if !response.status().is_success() {
-        return Err(auth_error("cannot obtain OpenAI signing keys"));
+        return Err(Error::http(&response, true));
     }
     let keys: JwkSet = serde_json::from_slice(&read_bounded(response, 256 * 1024).await?)
         .map_err(|_| auth_error("invalid OpenAI signing keys"))?;
@@ -116,6 +134,7 @@ async fn validate_id_token(
     validation.set_audience(&[client_id]);
     validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
     validation.leeway = 30;
+    validation.validate_exp = received_at.is_none();
     let claims = decode::<Claims>(token, &key, &validation)
         .map_err(|_| {
             auth_error("ID token signature, issuer, audience or expiry validation failed")
@@ -123,6 +142,7 @@ async fn validate_id_token(
         .claims;
     if claims.iss != ISSUER
         || claims.sub.is_empty()
+        || received_at.is_some_and(|received| claims.exp <= received)
         || nonce.is_some_and(|n| claims.nonce.as_deref() != Some(n))
     {
         return Err(auth_error("ID token identity or nonce mismatch"));
@@ -148,9 +168,25 @@ async fn token_request(
         .await
         .map_err(Error::transport)?;
     if !response.status().is_success() {
-        return Err(auth_error(
-            "OpenAI token exchange failed; sign in again if authorization was revoked",
-        ));
+        let status = response.status();
+        let mut error = Error::new(
+            if status.as_u16() == 429 {
+                "rate_limited"
+            } else if status.is_server_error() {
+                "provider"
+            } else {
+                "authentication"
+            },
+            "OpenAI token exchange failed",
+        );
+        error.status = Some(status.as_u16());
+        error.request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_owned);
+        error.retryable = status.as_u16() == 429 || status.is_server_error();
+        return Err(error);
     }
     let token: TokenResponse = serde_json::from_slice(&read_bounded(response, 256 * 1024).await?)
         .map_err(|_| auth_error("invalid OAuth token response"))?;
@@ -163,45 +199,124 @@ async fn token_request(
     Ok(token)
 }
 
-/// Exclusive credential owner. A mutex coordinates token refresh across calls.
+type RefreshReceiver = watch::Receiver<Option<Result<String>>>;
+
+struct SessionState {
+    credentials: Option<Credentials>,
+    pending: Option<PendingRotation>,
+    in_flight: Option<RefreshReceiver>,
+    failure: Option<(Error, Option<tokio::time::Instant>)>,
+}
+
+/// Exclusive credential owner with shared refresh outcomes and durable recovery.
 pub struct OAuthSession {
     store: Store,
-    credentials: Mutex<Option<Credentials>>,
+    state: Mutex<SessionState>,
     client: Client,
     endpoints: Endpoints,
+    tasks: TaskTracker,
+    stopping: AtomicBool,
 }
 
 impl OAuthSession {
     /// Open protected OAuth state and acquire its process-lifetime lease.
-    pub fn open(path: &Path, client: Client) -> Result<Self> {
+    pub fn open(path: &Path) -> Result<Self> {
         let store = Store::open(path)?;
-        let credentials = Mutex::new(store.load()?);
+        let state = Mutex::new(SessionState {
+            credentials: store.load()?,
+            pending: store.pending()?,
+            in_flight: None,
+            failure: None,
+        });
         Ok(Self {
             store,
-            credentials,
-            client,
+            state,
+            client: auth_client()?,
             endpoints: Endpoints::default(),
+            tasks: TaskTracker::new(),
+            stopping: AtomicBool::new(false),
         })
     }
 
     /// Obtain an access token, refreshing and durably rotating credentials if needed.
     pub async fn access_token(self: &Arc<Self>) -> Result<String> {
-        // A cancelled model call must not interrupt a rotating refresh after OpenAI
-        // has consumed the old refresh token. The bounded task persists independently.
-        let session = self.clone();
-        tokio::spawn(async move { session.refresh_or_read().await })
-            .await
-            .map_err(|_| auth_error("OAuth refresh task failed"))?
+        let mut state = self.state.lock().await;
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(Error::new("shutdown", "OAuth owner is shutting down"));
+        }
+        let mut receiver = if let Some(receiver) = &state.in_flight {
+            receiver.clone()
+        } else {
+            if let Some((error, until)) = &state.failure
+                && until.is_none_or(|until| tokio::time::Instant::now() < until)
+            {
+                return Err(error.clone());
+            }
+            if state.pending.is_none() {
+                let current = state
+                    .credentials
+                    .as_ref()
+                    .ok_or_else(|| auth_error("run llm-mcp login or auth import first"))?;
+                if current.expires_at > now().saturating_add(60) {
+                    return Ok(current.access_token.clone());
+                }
+            }
+            let (sender, receiver) = watch::channel(None);
+            state.in_flight = Some(receiver.clone());
+            let session = self.clone();
+            self.tasks.spawn(async move {
+                let result = session.refresh_or_recover().await;
+                let mut state = session.state.lock().await;
+                if let Err(error) = &result {
+                    let retry_at = error
+                        .retryable
+                        .then(|| tokio::time::Instant::now() + std::time::Duration::from_secs(30));
+                    state.failure = Some((error.clone(), retry_at));
+                    if retry_at.is_none() {
+                        state.credentials = None;
+                    }
+                } else {
+                    state.failure = None;
+                }
+                let _ = sender.send(Some(result));
+                state.in_flight = None;
+            });
+            receiver
+        };
+        drop(state);
+        loop {
+            if let Some(result) = receiver.borrow().clone() {
+                return result;
+            }
+            receiver
+                .changed()
+                .await
+                .map_err(|_| auth_error("OAuth refresh task failed"))?;
+        }
     }
 
-    async fn refresh_or_read(&self) -> Result<String> {
-        let mut guard = self.credentials.lock().await;
-        let current = guard
-            .as_ref()
-            .ok_or_else(|| auth_error("run llm-mcp login or auth import first"))?;
-        if current.expires_at > now().saturating_add(60) {
-            return Ok(current.access_token.clone());
+    async fn refresh_or_recover(&self) -> Result<String> {
+        let pending = self.state.lock().await.pending.clone();
+        if let Some(pending) = pending {
+            let access_token = self.finish_pending(pending).await?;
+            if self
+                .state
+                .lock()
+                .await
+                .credentials
+                .as_ref()
+                .is_some_and(|c| c.expires_at > now().saturating_add(60))
+            {
+                return Ok(access_token);
+            }
         }
+        let current = self
+            .state
+            .lock()
+            .await
+            .credentials
+            .clone()
+            .ok_or_else(|| auth_error("OAuth reauthorization required"))?;
         let token = token_request(
             &self.client,
             &self.endpoints,
@@ -212,20 +327,17 @@ impl OAuthSession {
                 ("resource", RESOURCE),
             ],
         )
-        .await?;
-        let mut updated = current.clone();
-        if let Some(id_token) = token.id_token {
-            let claims = validate_id_token(
-                &self.client,
-                &self.endpoints,
-                &id_token,
-                &current.client_id,
-                None,
-            )
-            .await?;
-            if claims.sub != current.subject {
-                return Err(auth_error("refreshed account identity changed"));
+        .await
+        .map_err(|error| {
+            if error.status.is_none() {
+                auth_error("ambiguous OAuth token exchange; reauthorization required")
+            } else {
+                error
             }
+        })?;
+        let mut updated = current.clone();
+        let verify_id_token = token.id_token.is_some();
+        if let Some(id_token) = token.id_token {
             updated.id_token = id_token;
         }
         updated.access_token = token.access_token;
@@ -238,12 +350,71 @@ impl OAuthSession {
         updated.expires_at = now()
             .checked_add(token.expires_in)
             .ok_or_else(|| auth_error("invalid token expiry"))?;
-        // Publish to memory only after durable persistence succeeds.
-        self.store.save(&updated)?;
-        let result = updated.access_token.clone();
-        *guard = Some(updated);
-        Ok(result)
+        let pending = PendingRotation {
+            credentials: updated,
+            verify_id_token,
+            received_at: now(),
+        };
+        self.state.lock().await.pending = Some(pending.clone());
+        self.finish_pending(pending).await
     }
+
+    async fn finish_pending(&self, pending: PendingRotation) -> Result<String> {
+        let persistence = |mut error: Error| {
+            error.retryable = true;
+            error
+        };
+        // Keep a durable replacement token BEFORE any fallible network validation.
+        self.store.stage(&pending).map_err(persistence)?;
+        let updated = &pending.credentials;
+        if updated.ext_agent_host_id != self.store.host_id {
+            return Err(auth_error("pending OAuth host mismatch"));
+        }
+        updated.validate()?;
+        if pending.verify_id_token {
+            let claims = validate_id_token_at(
+                &self.client,
+                &self.endpoints,
+                &updated.id_token,
+                &updated.client_id,
+                None,
+                Some(pending.received_at),
+            )
+            .await?;
+            if claims.sub != updated.subject {
+                return Err(auth_error("refreshed account identity changed"));
+            }
+        }
+        self.store.save(updated).map_err(persistence)?;
+        self.store.clear_pending().map_err(persistence)?;
+        let mut state = self.state.lock().await;
+        state.credentials = Some(updated.clone());
+        state.pending = None;
+        Ok(updated.access_token.clone())
+    }
+
+    /// Stop starting refreshes, while allowing an already-started rotation to finish.
+    pub fn stop(&self) {
+        self.stopping.store(true, Ordering::Release);
+    }
+
+    /// Join refresh work before destroying the runtime or releasing credential ownership.
+    pub async fn shutdown(&self) {
+        self.stop();
+        let state = self.state.lock().await;
+        self.tasks.close();
+        drop(state);
+        self.tasks.wait().await;
+    }
+}
+
+fn auth_client() -> Result<Client> {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(Error::transport)
 }
 
 #[derive(Clone, Deserialize)]
@@ -276,11 +447,7 @@ async fn callback(
 
 /// Complete browser-based OpenAI login. The loopback listener is bounded to five minutes.
 pub async fn login(path: &Path) -> Result<()> {
-    let client = Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(Error::transport)?;
+    let client = auth_client()?;
     let store = Store::open(path)?;
     let previous = store.load()?;
     let state = random_secret();
@@ -326,7 +493,8 @@ pub async fn login(path: &Path) -> Result<()> {
                 .append_pair("agent_name_hint", "llm-mcp");
         }
     }
-    eprintln!("Continue with ChatGPT:\n{url}");
+    let fallback = fallback_authorization_url(&url);
+    eprintln!("Continue with ChatGPT:\n{fallback}");
     open_browser(url.as_str());
     let result = tokio::time::timeout(std::time::Duration::from_secs(300), rx).await;
     server.abort();
@@ -341,7 +509,7 @@ pub async fn login(path: &Path) -> Result<()> {
             return Err(auth_error("OAuth client registration changed"));
         }
         (Some(old), _) => old.client_id.clone(),
-        (None, Some(id)) if id.starts_with("oaiapp_") => id,
+        (None, Some(id)) if !id.is_empty() && id != "dynamic_agent_client" => id,
         _ => {
             return Err(auth_error(
                 "OAuth registration did not return an issued client ID",
@@ -399,18 +567,41 @@ pub async fn login(path: &Path) -> Result<()> {
             .checked_add(token.expires_in)
             .ok_or_else(|| auth_error("invalid token expiry"))?,
     };
-    store.save(&credentials)
+    store.save(&credentials)?;
+    store.clear_pending()
+}
+
+fn fallback_authorization_url(url: &Url) -> Url {
+    let mut fallback = url.clone();
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "id_token_hint")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    fallback.set_query(None);
+    fallback.query_pairs_mut().extend_pairs(pairs);
+    fallback
 }
 
 fn open_browser(url: &str) {
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(url).spawn();
+    let _ = std::process::Command::new("open")
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("rundll32")
         .args(["url.dll,FileProtocolHandler", url])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
-    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    let _ = std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 /// Credential status containing no tokens.
@@ -422,16 +613,20 @@ pub struct AuthStatus {
     pub host_id: String,
     /// Access-token expiry, if signed in. Status does not refresh tokens.
     pub expires_at: Option<u64>,
+    /// Whether a rotation must finish validation/persistence before inference.
+    pub rotation_pending: bool,
 }
 
 /// Inspect protected state without revealing credentials.
 pub fn status(path: &Path) -> Result<AuthStatus> {
     let store = Store::open(path)?;
     let credentials = store.load()?;
+    let pending = store.pending()?;
     Ok(AuthStatus {
-        signed_in: credentials.is_some(),
+        signed_in: credentials.is_some() || pending.is_some(),
         host_id: store.host_id.clone(),
         expires_at: credentials.map(|c| c.expires_at),
+        rotation_pending: pending.is_some(),
     })
 }
 

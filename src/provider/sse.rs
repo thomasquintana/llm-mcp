@@ -7,18 +7,20 @@ use serde_json::Value;
 #[derive(Default)]
 struct Decoder {
     buffer: Vec<u8>,
+    scan: usize,
+    consumed: usize,
     data: Vec<u8>,
 }
 
 impl Decoder {
     fn push(&mut self, bytes: &[u8]) -> Result<Option<Value>> {
         self.buffer.extend_from_slice(bytes);
-        while let Some(end) = self.buffer.iter().position(|b| *b == b'\n') {
-            let mut line: Vec<u8> = self.buffer.drain(..=end).collect();
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
+        while let Some(relative) = self.buffer[self.scan..].iter().position(|b| *b == b'\n') {
+            let end = self.scan + relative;
+            let line = &self.buffer[self.consumed..end];
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            self.scan = end + 1;
+            self.consumed = end + 1;
             if line.is_empty() {
                 if self.data.is_empty() {
                     continue;
@@ -56,12 +58,22 @@ impl Decoder {
                 self.data.push(b'\n');
             }
         }
+        self.scan = self.buffer.len();
+        if self.consumed > 0 {
+            self.buffer.drain(..self.consumed);
+            self.scan -= self.consumed;
+            self.consumed = 0;
+        }
         Ok(None)
     }
 }
 
 /// Collect an OAuth stream until its required completed terminal event.
-pub async fn collect(mut response: Response, limit: usize) -> Result<Value> {
+pub async fn collect(
+    mut response: Response,
+    limit: usize,
+    provider: &super::Provider,
+) -> Result<Value> {
     if !response
         .headers()
         .get("content-type")
@@ -83,7 +95,14 @@ pub async fn collect(mut response: Response, limit: usize) -> Result<Value> {
             ));
         }
         total += bytes.len();
-        if let Some(value) = decoder.push(&bytes)? {
+        let (next, result) = provider
+            .cpu(move || {
+                let result = decoder.push(&bytes);
+                (decoder, result)
+            })
+            .await?;
+        decoder = next;
+        if let Some(value) = result? {
             return Ok(value);
         }
     }
@@ -124,5 +143,21 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn large_single_line_event_in_tiny_chunks_is_decoded_without_rescanning_prefixes() {
+        let padding = "x".repeat(1024 * 1024);
+        let event = format!(
+            "data: {{\"type\":\"response.completed\",\"response\":{{\"status\":\"completed\",\"padding\":\"{padding}\"}}}}\n\n"
+        );
+        let mut decoder = Decoder::default();
+        let mut result = None;
+        for chunk in event.as_bytes().chunks(17) {
+            if let Some(value) = decoder.push(chunk).unwrap() {
+                result = Some(value);
+            }
+        }
+        assert_eq!(result.unwrap()["padding"], padding);
     }
 }

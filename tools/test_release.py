@@ -10,11 +10,94 @@ from unittest.mock import patch
 import urllib.error
 import io
 import json
+import gzip
 
 import release
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_rebuilt_files_are_replaced_with_the_original_frozen_release_set(self):
+        package_version = "1.2.3"
+        revision = "a" * 40
+        files = {
+            name: f"original-{name}".encode()
+            for name in release.expected_assets(package_version)
+        }
+        receipt = {
+            "version": package_version,
+            "commit": revision,
+            "files": {
+                name: hashlib.sha256(data).hexdigest() for name, data in files.items()
+            },
+            "images": {},
+        }
+        files["receipt.json"] = json.dumps(receipt).encode()
+
+        def download(_tag, name, directory):
+            (directory / name).write_bytes(files[name])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for name in receipt["files"]:
+                (directory / name).write_bytes(b"different-rebuilt-content")
+            with (
+                patch("release.release_assets", return_value={"receipt.json": {}}),
+                patch("release.download_asset", side_effect=download),
+                patch("subprocess.run") as run,
+            ):
+                release.prepare_release(directory, package_version, revision)
+                run.assert_not_called()
+            for name, data in files.items():
+                self.assertEqual((directory / name).read_bytes(), data)
+
+    def test_receipt_binds_container_executable_to_binary_archive_and_rejects_drift(
+        self,
+    ):
+        def docker_image(path, architecture, binary, compressed=False):
+            layer = io.BytesIO()
+            with tarfile.open(fileobj=layer, mode="w") as archive:
+                info = tarfile.TarInfo("usr/local/bin/llm-mcp")
+                info.size = len(binary)
+                archive.addfile(info, io.BytesIO(binary))
+            files = {
+                "config.json": json.dumps({"architecture": architecture}).encode(),
+                "layer.tar": gzip.compress(layer.getvalue())
+                if compressed
+                else layer.getvalue(),
+                "manifest.json": json.dumps(
+                    [{"Config": "config.json", "Layers": ["layer.tar"]}]
+                ).encode(),
+            }
+            with tarfile.open(path, "w") as image:
+                for name, data in files.items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    image.addfile(info, io.BytesIO(data))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            binary = directory / "binary"
+            binary.write_bytes(b"tested-binary")
+            for target in release.TARGETS:
+                release.archive(binary, target, directory, "1.2.3")
+            (directory / "llm-mcp-1.2.3.crate").write_bytes(b"crate")
+            for arch in ("amd64", "arm64"):
+                docker_image(
+                    directory / f"image-{arch}.tar",
+                    arch,
+                    b"tested-binary",
+                    compressed=arch == "arm64",
+                )
+            receipt = release.build_receipt(directory, "1.2.3", "a" * 40)
+            release.verify_receipt(receipt, directory, "1.2.3", "a" * 40)
+            with self.assertRaises(ValueError):
+                release.verify_receipt(receipt, directory, "1.2.3", "b" * 40)
+            docker_image(directory / "image-arm64.tar", "arm64", b"different-build")
+            with self.assertRaises(ValueError):
+                release.build_receipt(directory, "1.2.3", "a" * 40)
+            with self.assertRaises(ValueError):
+                release.verify_receipt(receipt, directory, "1.2.3", "a" * 40)
+
     def test_crate_resume_distinguishes_missing_transient_and_different_contents(self):
         with tempfile.TemporaryDirectory() as temp:
             crate = Path(temp) / "package.crate"
@@ -70,6 +153,9 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), repeated.read_bytes())
                 self.assertTrue(
                     path.with_name(f"{path.name}.sha256").read_text().startswith(digest)
+                )
+                self.assertNotIn(
+                    b"\r", path.with_name(f"{path.name}.sha256").read_bytes()
                 )
                 if path.suffix == ".zip":
                     with zipfile.ZipFile(path) as bundle:

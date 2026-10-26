@@ -9,9 +9,13 @@ use crate::{
 };
 use reqwest::{Client, Response, header};
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::{TaskTracker, task_tracker::TaskTrackerToken};
 
 /// Which provider endpoint handles a tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,30 +33,30 @@ pub struct Provider {
     pub config: Arc<Config>,
     client: Client,
     slots: Arc<Semaphore>,
+    cpu_slots: Arc<Semaphore>,
+    stopping: Arc<AtomicBool>,
+    active: TaskTracker,
     oauth: Option<Arc<OAuthSession>>,
 }
 
 impl Provider {
     /// Construct a provider. No network request is made.
     pub fn new(config: Config) -> Result<Self> {
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .map_err(Error::transport)?;
+        let client = client_builder().build().map_err(Error::transport)?;
         let slots = Arc::new(Semaphore::new(config.concurrency));
+        let cpu_slots = Arc::new(Semaphore::new(config.concurrency));
         let oauth = if config.generate_auth == AuthMode::OAuth {
-            Some(Arc::new(OAuthSession::open(
-                &config.credentials_path,
-                client.clone(),
-            )?))
+            Some(Arc::new(OAuthSession::open(&config.credentials_path)?))
         } else {
             None
         };
         Ok(Self {
             config: Arc::new(config),
             client,
+            cpu_slots,
             slots,
+            stopping: Arc::new(AtomicBool::new(false)),
+            active: TaskTracker::new(),
             oauth,
         })
     }
@@ -64,16 +68,26 @@ impl Provider {
         arguments: Value,
         cancel: CancellationToken,
     ) -> Result<Value> {
+        self.call_until(
+            operation,
+            arguments,
+            cancel,
+            tokio::time::Instant::now() + self.config.timeout,
+        )
+        .await
+    }
+
+    pub(crate) async fn call_until(
+        &self,
+        operation: Operation,
+        arguments: Value,
+        cancel: CancellationToken,
+        deadline: tokio::time::Instant,
+    ) -> Result<Value> {
+        let _activity = self.activity();
         validate(&arguments)?;
-        if serde_json::to_vec(&arguments)
-            .map_err(|_| Error::new("invalid_request", "invalid JSON"))?
-            .len()
-            > self.config.max_request_bytes
-        {
-            return Err(Error::new(
-                "request_too_large",
-                "tool arguments exceed configured byte limit",
-            ));
+        if self.stopping.load(Ordering::Acquire) {
+            return Err(Error::new("shutdown", "server is shutting down"));
         }
         let execute = async {
             let _permit = self
@@ -83,20 +97,82 @@ impl Provider {
                 .map_err(|_| Error::new("shutdown", "server is shutting down"))?;
             self.execute(operation, arguments).await
         };
-        tokio::select! {
+        let result = tokio::select! {
             biased;
             () = cancel.cancelled() => Err(Error::new("cancelled", "tool call cancelled")),
-            result = tokio::time::timeout(self.config.timeout, execute) => result.unwrap_or_else(|_| {
-                let mut error = Error::new("timeout", "tool deadline exceeded"); error.retryable = true; Err(error)
-            }),
+            result = tokio::time::timeout_at(deadline, execute) => result.unwrap_or_else(|_| Err(deadline_error())),
+        };
+        if cancel.is_cancelled() {
+            return Err(Error::new("cancelled", "tool call cancelled"));
         }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(deadline_error());
+        }
+        result
+    }
+
+    pub(crate) async fn cpu<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<T> {
+        let permit = self
+            .cpu_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| Error::new("shutdown", "server is shutting down"))?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work()
+        })
+        .await
+        .map_err(|_| Error::new("internal", "JSON worker failed"))
+    }
+
+    /// Stop admitting work and stop starting new OAuth refresh operations.
+    pub fn stop(&self) {
+        self.stopping.store(true, Ordering::Release);
+        self.slots.close();
+        if let Some(oauth) = &self.oauth {
+            oauth.stop();
+        }
+        self.active.close();
+    }
+
+    /// Join any rotating credential work before the runtime exits.
+    pub async fn shutdown(&self) {
+        self.stop();
+        let _ = tokio::time::timeout(
+            self.config.timeout + std::time::Duration::from_secs(5),
+            self.active.wait(),
+        )
+        .await;
+        if let Some(oauth) = &self.oauth {
+            oauth.shutdown().await;
+        }
+    }
+
+    pub(crate) fn activity(&self) -> TaskTrackerToken {
+        self.active.token()
     }
 
     async fn execute(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
         let oauth =
             operation == Operation::Generate && self.config.generate_auth == AuthMode::OAuth;
-        let key = if oauth {
+        if oauth {
             prepare_oauth(&mut arguments)?;
+        }
+        let bytes = self
+            .cpu(move || serde_json::to_vec(&arguments))
+            .await?
+            .map_err(|_| Error::new("invalid_request", "invalid JSON"))?;
+        if bytes.len() > self.config.max_request_bytes {
+            return Err(Error::new(
+                "request_too_large",
+                "tool arguments exceed configured byte limit",
+            ));
+        }
+        let key = if oauth {
             self.oauth
                 .as_ref()
                 .expect("OAuth initialized")
@@ -132,7 +208,8 @@ impl Provider {
                     "application/json"
                 },
             )
-            .json(&arguments);
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(bytes);
         if !oauth && let Some(value) = &self.config.organization {
             request = request.header("OpenAI-Organization", value);
         }
@@ -147,25 +224,26 @@ impl Provider {
             .and_then(|h| h.to_str().ok())
             .map(str::to_owned);
         if !status.is_success() {
-            let mut error = Error::new(
-                match status.as_u16() {
-                    401 | 403 => "authentication",
-                    429 => "rate_limited",
-                    400 | 422 => "provider_invalid_request",
-                    _ => "provider",
-                },
-                format!("OpenAI returned HTTP {}", status.as_u16()),
-            );
-            error.status = Some(status.as_u16());
-            error.request_id = request_id;
-            error.retryable = status.as_u16() == 429 || status.is_server_error();
-            return Err(error);
+            return Err(Error::http(&response, false));
         }
+        self.decode_response(operation, response, oauth)
+            .await
+            .map_err(|error| error.context(status.as_u16(), request_id))
+    }
+
+    async fn decode_response(
+        &self,
+        operation: Operation,
+        response: Response,
+        oauth: bool,
+    ) -> Result<Value> {
         if oauth {
-            return sse::collect(response, self.config.max_response_bytes).await;
+            return sse::collect(response, self.config.max_response_bytes, self).await;
         }
         let bytes = read_bounded(response, self.config.max_response_bytes).await?;
-        let value: Value = serde_json::from_slice(&bytes)
+        let value: Value = self
+            .cpu(move || serde_json::from_slice(&bytes))
+            .await?
             .map_err(|_| Error::new("provider_protocol", "OpenAI returned invalid JSON"))?;
         if !value.is_object() {
             return Err(Error::new(
@@ -191,6 +269,19 @@ impl Provider {
         }
         Ok(value)
     }
+}
+
+fn client_builder() -> reqwest::ClientBuilder {
+    Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .connect_timeout(std::time::Duration::from_secs(10))
+}
+
+pub(crate) fn deadline_error() -> Error {
+    let mut error = Error::new("timeout", "tool deadline exceeded");
+    error.retryable = true;
+    error
 }
 
 fn prepare_oauth(arguments: &mut Value) -> Result<()> {
@@ -274,3 +365,6 @@ pub async fn read_bounded(mut response: Response, limit: usize) -> Result<Vec<u8
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests;

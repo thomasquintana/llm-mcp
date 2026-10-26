@@ -18,6 +18,243 @@ fn credentials(host: &str) -> Credentials {
     }
 }
 
+async fn token_mock(
+    status: axum::http::StatusCode,
+    body: Value,
+    delay: std::time::Duration,
+) -> (Endpoints, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let counter = count.clone();
+    let app = Router::new().route(
+        "/token",
+        post(move || {
+            let counter = counter.clone();
+            let body = body.clone();
+            async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(delay).await;
+                (status, [("x-request-id", "req-token")], Json(body))
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let token = format!("http://{}/token", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (
+        Endpoints {
+            token,
+            ..Endpoints::default()
+        },
+        count,
+        task,
+    )
+}
+
+fn saved_session(path: &Path) -> OAuthSession {
+    let store = Store::open(path).unwrap();
+    store.save(&credentials(&store.host_id)).unwrap();
+    drop(store);
+    OAuthSession::open(path).unwrap()
+}
+
+#[test]
+fn returning_login_fallback_omits_id_token_hint_but_preserves_pkce_and_state() {
+    let url=Url::parse("https://auth.openai.com/api/accounts/authorize?client_id=oaiapp_test&state=bound&code_challenge=pkce&id_token_hint=secret-id-token").unwrap();
+    let fallback = fallback_authorization_url(&url);
+    assert!(!fallback.as_str().contains("secret-id-token"));
+    let parameters: std::collections::HashMap<_, _> = fallback.query_pairs().collect();
+    assert_eq!(parameters["state"], "bound");
+    assert_eq!(parameters["code_challenge"], "pkce");
+    assert_eq!(parameters["client_id"], "oaiapp_test");
+}
+
+#[tokio::test]
+async fn refresh_failures_are_shared_and_abandoned_waiters_do_not_retry() {
+    for status in [
+        axum::http::StatusCode::TOO_MANY_REQUESTS,
+        axum::http::StatusCode::UNAUTHORIZED,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("auth.json");
+        let mut session = saved_session(&path);
+        let (endpoints, count, task) = token_mock(
+            status,
+            json!({"error":"invalid_grant"}),
+            std::time::Duration::from_millis(30),
+        )
+        .await;
+        session.endpoints = endpoints;
+        let session = Arc::new(session);
+        let mut calls = Vec::new();
+        for _ in 0..20 {
+            let s = session.clone();
+            calls.push(tokio::spawn(
+                async move { s.access_token().await.unwrap_err() },
+            ));
+        }
+        for call in calls {
+            let error = call.await.unwrap();
+            assert_eq!(error.status, Some(status.as_u16()));
+            assert_eq!(error.request_id.as_deref(), Some("req-token"));
+            assert_eq!(error.retryable, status.as_u16() == 429);
+        }
+        assert!(session.access_token().await.is_err());
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        session.shutdown().await;
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn pending_rotation_recovers_after_persistence_failure_without_exchanging_old_token() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let mut session = saved_session(&path);
+    let (endpoints,count,task)=token_mock(axum::http::StatusCode::OK,json!({"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}),std::time::Duration::ZERO).await;
+    session.endpoints = endpoints.clone();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let session = Arc::new(session);
+    let error = session.access_token().await.unwrap_err();
+    assert_eq!(error.code, "credential_store");
+    assert!(error.retryable);
+    assert_eq!(
+        session
+            .store
+            .pending()
+            .unwrap()
+            .unwrap()
+            .credentials
+            .refresh_token,
+        "new-refresh"
+    );
+    session.shutdown().await;
+    drop(session);
+    std::fs::remove_dir(&path).unwrap();
+    let mut reopened = OAuthSession::open(&path).unwrap();
+    reopened.endpoints = endpoints;
+    let reopened = Arc::new(reopened);
+    assert_eq!(reopened.access_token().await.unwrap(), "new-access");
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    assert!(reopened.store.pending().unwrap().is_none());
+    assert_eq!(
+        reopened.store.load().unwrap().unwrap().refresh_token,
+        "new-refresh"
+    );
+    reopened.shutdown().await;
+    task.abort();
+}
+
+#[tokio::test]
+async fn shutdown_joins_rotation_after_the_original_caller_is_cancelled() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let mut session = saved_session(&path);
+    let (endpoints,count,task)=token_mock(axum::http::StatusCode::OK,json!({"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}),std::time::Duration::from_millis(50)).await;
+    session.endpoints = endpoints;
+    let session = Arc::new(session);
+    let caller = session.clone();
+    let caller = tokio::spawn(async move { caller.access_token().await });
+    while count.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    caller.abort();
+    session.shutdown().await;
+    assert_eq!(
+        session.store.load().unwrap().unwrap().refresh_token,
+        "new-refresh"
+    );
+    assert_eq!(session.access_token().await.unwrap_err().code, "shutdown");
+    task.abort();
+}
+
+#[tokio::test]
+async fn jwt_validation_outage_keeps_rotated_credentials_durable_for_restart() {
+    use aws_lc_rs::{
+        rsa::{KeyPair, KeySize},
+        signature::KeyPair as _,
+    };
+    let key = KeyPair::generate(KeySize::Rsa2048).unwrap();
+    let keys = json!({"keys":[{"kty":"RSA","kid":"test","alg":"RS256","use":"sig","n":URL_SAFE_NO_PAD.encode(key.public_key().modulus().big_endian_without_leading_zero()),"e":URL_SAFE_NO_PAD.encode(key.public_key().exponent().big_endian_without_leading_zero())}]});
+    let message = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","kid":"test"}"#),
+        URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(
+                &json!({"iss":ISSUER,"aud":"oaiapp_test","sub":"user-123","exp":now()+3600})
+            )
+            .unwrap()
+        )
+    );
+    let mut signature = vec![0; key.public_modulus_len()];
+    key.sign(
+        &aws_lc_rs::signature::RSA_PKCS1_SHA256,
+        &aws_lc_rs::rand::SystemRandom::new(),
+        message.as_bytes(),
+        &mut signature,
+    )
+    .unwrap();
+    let id_token = format!("{message}.{}", URL_SAFE_NO_PAD.encode(signature));
+    let ready = Arc::new(AtomicBool::new(false));
+    let available = ready.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let jwks = format!("http://{}/keys", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/keys",
+                get(move || {
+                    let keys = keys.clone();
+                    let available = available.clone();
+                    async move {
+                        if available.load(Ordering::SeqCst) {
+                            (axum::http::StatusCode::OK, Json(keys))
+                        } else {
+                            (axum::http::StatusCode::SERVICE_UNAVAILABLE, Json(json!({})))
+                        }
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let (mut endpoints,count,task)=token_mock(axum::http::StatusCode::OK,json!({"access_token":"rotated","refresh_token":"rotated-refresh","id_token":id_token,"expires_in":3600,"token_type":"Bearer"}),std::time::Duration::ZERO).await;
+    endpoints.jwks = jwks;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let mut session = saved_session(&path);
+    session.endpoints = endpoints.clone();
+    let session = Arc::new(session);
+    let error = session.access_token().await.unwrap_err();
+    assert_eq!(error.status, Some(503));
+    assert!(error.retryable);
+    assert_eq!(
+        session
+            .store
+            .pending()
+            .unwrap()
+            .unwrap()
+            .credentials
+            .refresh_token,
+        "rotated-refresh"
+    );
+    session.shutdown().await;
+    drop(session);
+    ready.store(true, Ordering::SeqCst);
+    let mut session = OAuthSession::open(&path).unwrap();
+    session.endpoints = endpoints;
+    let session = Arc::new(session);
+    assert_eq!(session.access_token().await.unwrap(), "rotated");
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    session.shutdown().await;
+    task.abort();
+    server.abort();
+}
+
 #[test]
 fn store_exclusivity_import_permissions_and_host_survive_logout() {
     let temp = tempfile::tempdir().unwrap();
@@ -73,7 +310,7 @@ async fn refresh_is_single_flight_durable_and_survives_caller_cancellation() {
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    let mut session = OAuthSession::open(&path, Client::new()).unwrap();
+    let mut session = OAuthSession::open(&path).unwrap();
     session.endpoints.token = url;
     let session = Arc::new(session);
     let abandoned = session.clone();
@@ -356,4 +593,63 @@ async fn oauth_generation_uses_internal_stream_and_classification_uses_key() {
         "unsupported_oauth_option"
     );
     task.abort();
+}
+
+#[tokio::test]
+async fn oauth_stream_failures_preserve_provider_context() {
+    use crate::{
+        config::Config,
+        provider::{Operation, Provider},
+    };
+    use tokio_util::sync::CancellationToken;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let store = Store::open(&path).unwrap();
+    let mut record = credentials(&store.host_id);
+    record.expires_at = now() + 3600;
+    store.save(&record).unwrap();
+    drop(store);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener,Router::new().route("/v1/responses",post(|Json(body):Json<Value>|async move {
+            let body=match body["input"][0]["content"].as_str().unwrap() {
+                "truncated" => "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n".into(),
+                "failed" => "data: {\"type\":\"response.failed\"}\n\n".into(),
+                "malformed" => "data: malformed\n\n".into(),
+                "oversized" => format!(": {}\n\n","x".repeat(1024)),
+                _ => unreachable!(),
+            };
+            ([("content-type","text/event-stream"),("x-request-id","req-stream")],body)
+        }))).await.unwrap();
+    });
+    let config = Config::from_lookup(|key| match key {
+        "OPENAI_BASE_URL" => Some(url.clone()),
+        "LLM_MCP_GENERATE_AUTH" => Some("oauth".into()),
+        "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
+        "LLM_MCP_MAX_RESPONSE_BYTES" => Some("512".into()),
+        _ => None,
+    })
+    .unwrap();
+    let provider = Provider::new(config).unwrap();
+    for (input, code) in [
+        ("truncated", "provider_incomplete"),
+        ("failed", "provider_incomplete"),
+        ("malformed", "provider_protocol"),
+        ("oversized", "response_too_large"),
+    ] {
+        let error = provider
+            .call(
+                Operation::Generate,
+                json!({"input":[{"role":"user","content":input}]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.status, Some(200));
+        assert_eq!(error.request_id.as_deref(), Some("req-stream"));
+    }
+    provider.shutdown().await;
+    server.abort();
 }

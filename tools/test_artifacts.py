@@ -23,6 +23,10 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("persistentVolumeClaim", pod["volumes"][0])
         self.assertFalse(pod["containers"][0]["volumeMounts"][0].get("readOnly", False))
         self.assertTrue(pod["securityContext"]["runAsNonRoot"])
+        self.assertEqual(
+            pod["securityContext"]["fsGroupChangePolicy"], "OnRootMismatch"
+        )
+        self.assertIn("chmod 600", pod["initContainers"][0]["args"][0])
 
     def test_versioned_images_match_package_and_sessions_have_affinity(self):
         version = tomllib.loads((ROOT / "Cargo.toml").read_text())["package"]["version"]
@@ -31,7 +35,8 @@ class DeploymentTests(unittest.TestCase):
                 if resource["kind"] == "Service":
                     self.assertEqual(resource["spec"]["sessionAffinity"], "ClientIP")
                 if resource["kind"] in ("Deployment", "Job"):
-                    for container in resource["spec"]["template"]["spec"]["containers"]:
+                    pod = resource["spec"]["template"]["spec"]
+                    for container in pod["containers"] + pod.get("initContainers", []):
                         self.assertTrue(container["image"].endswith(f":{version}"))
                         self.assertTrue(
                             container["securityContext"]["readOnlyRootFilesystem"]

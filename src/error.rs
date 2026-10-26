@@ -45,6 +45,38 @@ impl Error {
         result.retryable = true;
         result
     }
+
+    pub(crate) fn http(response: &reqwest::Response, authentication: bool) -> Self {
+        let status = response.status();
+        let mut error = Self::new(
+            match status.as_u16() {
+                429 => "rate_limited",
+                500..=599 => "provider",
+                _ if authentication || matches!(status.as_u16(), 401 | 403) => "authentication",
+                400 | 422 => "provider_invalid_request",
+                _ => "provider",
+            },
+            format!("OpenAI returned HTTP {}", status.as_u16()),
+        );
+        error.retryable = status.as_u16() == 429 || status.is_server_error();
+        error.status = Some(status.as_u16());
+        error.request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_owned);
+        error
+    }
+
+    pub(crate) fn context(mut self, status: u16, request_id: Option<String>) -> Self {
+        if self.status.is_none() {
+            self.status = Some(status);
+        }
+        if self.request_id.is_none() {
+            self.request_id = request_id;
+        }
+        self
+    }
 }
 
 /// Application result type.

@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      build_attempt: ${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -45,7 +46,7 @@ jobs:
         include:
           - {os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, arch: amd64, linux: true}
           - {os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, arch: arm64, linux: true}
-          - {os: macos-14, target: aarch64-apple-darwin, linux: false}
+          - {os: macos-15, target: aarch64-apple-darwin, linux: false}
           - {os: macos-15-intel, target: x86_64-apple-darwin, linux: false}
           - {os: windows-latest, target: x86_64-pc-windows-msvc, linux: false}
     runs-on: ${{ matrix.os }}
@@ -81,7 +82,7 @@ jobs:
           TARGET: ${{ matrix.target }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: binaries-${{ matrix.target }}
+          name: binaries-${{ matrix.target }}-${{ needs.metadata.outputs.build_attempt }}
           path: |
             dist/*.tar.gz
             dist/*.zip
@@ -91,12 +92,45 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: matrix.linux
         with:
-          name: images-${{ matrix.arch }}
+          name: images-${{ matrix.arch }}-${{ needs.metadata.outputs.build_attempt }}
           path: dist/image-*.tar
           if-no-files-found: error
           retention-days: 7
-  crate:
+  prepare:
     needs: [metadata, checks, binaries]
+    if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: releases
+    outputs:
+      artifact: release-set-${{ github.run_attempt }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup toolchain install stable --profile minimal
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-*-${{ needs.metadata.outputs.build_attempt }}
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: images-*-${{ needs.metadata.outputs.build_attempt }}
+          path: dist
+          merge-multiple: true
+      - run: cargo package --locked
+      - run: python3 tools/release.py prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-set-${{ github.run_attempt }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+  crate:
+    needs: [metadata, checks, binaries, prepare]
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -107,13 +141,18 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: rustup toolchain install stable --profile minimal
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: dist
+          merge-multiple: true
       - id: auth
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
       - run: python3 tools/release.py publish-crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
   image:
-    needs: [metadata, checks, binaries]
+    needs: [metadata, checks, binaries, prepare]
     if: ${{ github.event_name == 'push' || !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -126,7 +165,7 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: images-*
+          name: ${{ needs.prepare.outputs.artifact }}
           path: dist
           merge-multiple: true
       - name: Authenticate to GHCR
@@ -138,7 +177,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
   finalize:
-    needs: [metadata, crate, image]
+    needs: [metadata, prepare, crate, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: releases
@@ -148,7 +187,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: binaries-*
+          name: ${{ needs.prepare.outputs.artifact }}
           path: dist
           merge-multiple: true
       - run: python3 tools/release.py github

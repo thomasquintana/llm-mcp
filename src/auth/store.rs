@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -6,6 +7,13 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct PendingRotation {
+    pub credentials: Credentials,
+    pub verify_id_token: bool,
+    pub received_at: u64,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Credentials {
@@ -25,7 +33,8 @@ impl Credentials {
     pub fn validate(&self) -> Result<()> {
         if self.issuer != "https://auth.openai.com"
             || self.subject.is_empty()
-            || !self.client_id.starts_with("oaiapp_")
+            || self.client_id.is_empty()
+            || self.client_id == "dynamic_agent_client"
             || self.access_token.is_empty()
             || self.refresh_token.is_empty()
             || !self.scopes.iter().any(|s| s == "chatgpt.tokens.use.direct")
@@ -66,6 +75,8 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(io_error)?;
+    #[cfg(windows)]
+    super::windows::protect(file.path())?;
     file.write_all(bytes).map_err(io_error)?;
     file.as_file().sync_all().map_err(io_error)?;
     file.persist(path)
@@ -122,6 +133,12 @@ impl Store {
     }
 
     pub fn read_path(path: &Path) -> Result<Credentials> {
+        let credentials: Credentials = Self::read_json(path)?;
+        credentials.validate()?;
+        Ok(credentials)
+    }
+
+    fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
         let metadata = fs::symlink_metadata(path).map_err(io_error)?;
         if !metadata.is_file() || metadata.len() > 256 * 1024 {
             return Err(Error::new(
@@ -139,16 +156,16 @@ impl Store {
                 ));
             }
         }
+        #[cfg(windows)]
+        super::windows::validate(path)?;
         let mut bytes = Vec::new();
         File::open(path)
             .map_err(io_error)?
             .take(256 * 1024 + 1)
             .read_to_end(&mut bytes)
             .map_err(io_error)?;
-        let credentials: Credentials = serde_json::from_slice(&bytes)
-            .map_err(|_| Error::new("credential_store", "invalid OAuth credential JSON"))?;
-        credentials.validate()?;
-        Ok(credentials)
+        serde_json::from_slice(&bytes)
+            .map_err(|_| Error::new("credential_store", "invalid OAuth credential JSON"))
     }
 
     pub fn load(&self) -> Result<Option<Credentials>> {
@@ -174,17 +191,42 @@ impl Store {
         )
     }
 
+    pub fn pending(&self) -> Result<Option<PendingRotation>> {
+        let path = self.path.with_extension("pending.json");
+        if path.exists() {
+            Self::read_json(&path).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn stage(&self, pending: &PendingRotation) -> Result<()> {
+        let bytes = serde_json::to_vec(pending)
+            .map_err(|_| Error::new("credential_store", "cannot stage OAuth rotation"))?;
+        atomic_write(&self.path.with_extension("pending.json"), &bytes)
+    }
+
+    pub fn clear_pending(&self) -> Result<()> {
+        remove_if_present(&self.path.with_extension("pending.json"))
+    }
+
     pub fn import(&self, source: &Path) -> Result<()> {
         let mut credentials = Self::read_path(source)?;
         credentials.ext_agent_host_id.clone_from(&self.host_id);
-        self.save(&credentials)
+        self.save(&credentials)?;
+        self.clear_pending()
     }
 
     pub fn clear(&self) -> Result<()> {
-        match fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(io_error(e)),
-        }
+        self.clear_pending()?;
+        remove_if_present(&self.path)
+    }
+}
+
+fn remove_if_present(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_error(e)),
     }
 }

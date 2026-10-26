@@ -21,13 +21,23 @@ OAuth state defaults to `$HOME/.config/llm-mcp/auth.json` (`USERPROFILE` on Wind
 Set `LLM_MCP_OAUTH_CREDENTIALS_PATH` to change it. The adjacent `.host.json` keeps
 stable installation identity; `.lock` enforces exclusive ownership. On Unix,
 credential files must have owner-only permissions. Writes use atomic replacement
-and synchronization. Stop the server before running login, import, status or logout
+and synchronization. On Windows, tokens receive a protected DACL limited to the
+current user and SYSTEM, and imported records must satisfy that policy; preserve or
+apply that ACL after a secure transfer. Stop the server before running login, import, status or logout
 against its credential record. `logout` clears local tokens but retains host identity;
 revoke the agent in ChatGPT settings to revoke authorization remotely.
 
-Refresh runs before token expiry. A single refresh owner durably replaces rotating
-tokens before publishing them to waiting calls. A cancelled caller does not cancel
-an already-running token refresh. Failed authorization is surfaced, never retried
+Refresh runs before token expiry. A single shared refresh operation distributes its
+outcome to waiters. Replacement tokens are staged in an owner-only `.pending.json`
+record before fallible ID validation and final persistence. Restart recovery resumes
+that pending validation/persistence, never re-exchanges the consumed token. Pending
+credentials cannot be used for inference until admitted and durably committed.
+Historical staged ID tokens are checked against their recorded receipt time; an
+expired recovered access token is then refreshed using the admitted replacement
+refresh token before inference.
+Temporary refresh failures are shared and briefly cooled down; terminal failures
+require reauthorization. A cancelled caller does not cancel an already-running
+refresh, and shutdown joins it before releasing state. Failed authorization is surfaced, never retried
 with different credentials. One process/replica owns each record.
 
 ## Standalone containers and Kubernetes

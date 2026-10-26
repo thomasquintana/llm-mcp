@@ -14,6 +14,19 @@ fn initialize() -> Value {
     json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"wire-tests","version":"1"}}})
 }
 
+fn stdio_command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_llm-mcp"));
+    command.env_clear();
+    // Isolate application configuration without discarding instrumentation or
+    // Windows system paths required by the process runtime.
+    for name in ["LLVM_PROFILE_FILE", "SYSTEMROOT", "WINDIR"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    command
+}
+
 async fn decode_http(response: reqwest::Response) -> Value {
     assert!(response.status().is_success(), "{}", response.status());
     let text = response.text().await.unwrap();
@@ -28,7 +41,7 @@ async fn decode_http(response: reqwest::Response) -> Value {
 
 #[tokio::test]
 async fn stdio_initializes_lists_calls_without_stdout_noise() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_llm-mcp"))
+    let mut child = stdio_command()
         .arg("serve")
         .env("LLM_MCP_TRANSPORT", "stdio")
         .env("OPENAI_API_KEY", "test")
@@ -99,6 +112,88 @@ async fn stdio_initializes_lists_calls_without_stdout_noise() {
             .unwrap()
             .success()
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stdio_sigterm_drains_an_accepted_call_before_exit() {
+    use axum::{Json, Router, routing::post};
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let mock = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/v1/responses",
+                post(move || {
+                    let tx = tx.clone();
+                    async move {
+                        tx.send(()).await.unwrap();
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Json(json!({"status":"completed","output":[]}))
+                    }
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let mut child = stdio_command()
+        .arg("serve")
+        .env("OPENAI_API_KEY", "test")
+        .env("OPENAI_BASE_URL", url)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+    input
+        .write_all(format!("{}\n", initialize()).as_bytes())
+        .await
+        .unwrap();
+    output.next_line().await.unwrap().unwrap();
+    for request in [
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"generate","arguments":{"input":"hello"}}}),
+    ] {
+        input
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        Command::new("/bin/kill")
+            .args(["-TERM", &child.id().unwrap().to_string()])
+            .status()
+            .await
+            .unwrap()
+            .success()
+    );
+    let result: Value = serde_json::from_str(
+        &tokio::time::timeout(Duration::from_secs(5), output.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["result"]["structuredContent"]["status"], "completed");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    mock.abort();
 }
 
 #[tokio::test]

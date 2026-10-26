@@ -24,10 +24,10 @@ use tokio_util::sync::CancellationToken;
 pub async fn serve(config: Config) -> Result<()> {
     let shutdown = CancellationToken::new();
     let signal = shutdown.clone();
-    let signals = tokio::spawn(async move {
+    let signals = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
         termination_signal().await;
         signal.cancel();
-    });
+    }));
     let result = if config.transport == "http" {
         let listener = TcpListener::bind(config.bind)
             .await
@@ -36,20 +36,33 @@ pub async fn serve(config: Config) -> Result<()> {
         serve_http(listener, config, shutdown).await
     } else {
         let limit = config.max_request_bytes.saturating_add(64 * 1024);
-        let handler = McpServer::new(Provider::new(config)?);
+        let provider = Provider::new(config)?;
+        let handler = McpServer::new(provider.clone());
         let transport = AsyncRwTransport::new_server(tokio::io::stdin(), tokio::io::stdout())
             .with_max_line_length(limit);
-        tokio::select! {
-            () = shutdown.cancelled() => Ok(()),
-            result = async {
-                let service = handler.serve(transport).await.map_err(|_| Error::new("transport", "MCP initialization failed"))?;
-                let cancellation = service.cancellation_token();
-                tokio::select! {
-                    () = shutdown.cancelled() => { cancellation.cancel(); Ok(()) },
-                    result = service.waiting() => result.map(|_| ()).map_err(|_| Error::new("transport", "MCP service failed")),
-                }
-            } => result,
-        }
+        let initialized = tokio::select! {
+            () = shutdown.cancelled() => None,
+            result = handler.serve(transport) => Some(result),
+        };
+        let result = if let Some(initialized) = initialized {
+            let service =
+                initialized.map_err(|_| Error::new("transport", "MCP initialization failed"))?;
+            let cancellation = service.cancellation_token();
+            let waiting = service.waiting();
+            tokio::pin!(waiting);
+            tokio::select! {
+                () = shutdown.cancelled() => {
+                    provider.shutdown().await;
+                    cancellation.cancel();
+                    waiting.await.map(|_| ()).map_err(|_| Error::new("transport", "MCP service failed"))
+                },
+                result = &mut waiting => result.map(|_| ()).map_err(|_| Error::new("transport", "MCP service failed")),
+            }
+        } else {
+            Ok(())
+        };
+        provider.shutdown().await;
+        result
     };
     signals.abort();
     result
@@ -62,7 +75,8 @@ pub async fn serve_http(
     shutdown: CancellationToken,
 ) -> Result<()> {
     let grace = config.timeout + std::time::Duration::from_secs(5);
-    let handler = McpServer::new(Provider::new(config.clone())?);
+    let provider = Provider::new(config.clone())?;
+    let handler = McpServer::new(provider.clone());
     let sessions = CancellationToken::new();
     let mut http =
         StreamableHttpServerConfig::default().with_allowed_hosts(config.allowed_hosts.clone());
@@ -101,16 +115,24 @@ pub async fn serve_http(
         .into_future();
     tokio::pin!(server);
     let result = tokio::select! {
-        result = &mut server => result,
+        result = &mut server => result.map_err(|_| Error::new("transport", "HTTP server failed")),
         () = shutdown.cancelled() => {
+            provider.stop();
             match tokio::time::timeout(grace, &mut server).await {
-                Ok(result) => result,
-                Err(_) => { sessions.cancel(); tokio::time::timeout(std::time::Duration::from_secs(5), &mut server).await.map_err(|_| Error::new("shutdown", "HTTP shutdown deadline exceeded"))? }
+                Ok(result) => result.map_err(|_| Error::new("transport", "HTTP server failed")),
+                Err(_) => {
+                    sessions.cancel();
+                    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut server).await {
+                        Ok(result) => result.map_err(|_| Error::new("transport", "HTTP server failed")),
+                        Err(_) => Err(Error::new("shutdown", "HTTP shutdown deadline exceeded")),
+                    }
+                }
             }
         }
     };
     sessions.cancel();
-    result.map_err(|_| Error::new("transport", "HTTP server failed"))
+    provider.shutdown().await;
+    result
 }
 
 async fn termination_signal() {

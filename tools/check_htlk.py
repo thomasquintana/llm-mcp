@@ -19,7 +19,12 @@ ROOT = Path(__file__).resolve().parents[1]
 class Provider(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        assert self.headers["Authorization"] == "Bearer integration-test"
+        oauth = self.path.endswith(
+            "responses"
+        ) and "text/event-stream" in self.headers.get("Accept", "")
+        assert self.headers["Authorization"] == (
+            "Bearer oauth-integration-test" if oauth else "Bearer integration-test"
+        )
         assert "model" in request
         response = (
             {
@@ -39,9 +44,15 @@ class Provider(http.server.BaseHTTPRequestHandler):
                 ]
             }
         )
-        body = json.dumps(response).encode()
+        body = (
+            f"data: {json.dumps({'type': 'response.completed', 'response': response})}\n\n"
+            if oauth
+            else json.dumps(response)
+        ).encode()
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header(
+            "Content-Type", "text/event-stream" if oauth else "application/json"
+        )
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

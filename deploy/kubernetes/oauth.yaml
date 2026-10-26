@@ -26,7 +26,18 @@ spec:
         runAsUser: 65532
         runAsGroup: 65532
         fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: credential-permissions
+          image: ghcr.io/thomasquintana/llm-mcp:0.1.0
+          command: [/bin/sh, -ec]
+          args: ["find /state -maxdepth 1 -type f -exec chmod 600 '{}' ';'"]
+          volumeMounts: [{name: oauth-state, mountPath: /state}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
       containers:
         - name: llm-mcp
           image: ghcr.io/thomasquintana/llm-mcp:0.1.0

@@ -32,14 +32,33 @@ impl McpServer {
         arguments: Value,
         cancel: CancellationToken,
     ) -> Result<CallToolResult, ErrorData> {
+        let _activity = self.provider.activity();
+        let deadline = tokio::time::Instant::now() + self.provider.config.timeout;
         let operation = match name {
             "generate" => Operation::Generate,
             "classify" => Operation::Classify,
             _ => return Err(ErrorData::invalid_params("unknown tool", None)),
         };
-        let mut result = match self.provider.call(operation, arguments, cancel).await {
+        let outcome = self
+            .provider
+            .call_until(operation, arguments, cancel.clone(), deadline)
+            .await;
+        let build = self.provider.cpu(move || match outcome {
             Ok(value) => CallToolResult::structured(value),
             Err(error) => CallToolResult::structured_error(json!({"error": error})),
+        });
+        let result = tokio::select! {
+            () = cancel.cancelled() => Err(crate::error::Error::new("cancelled", "tool call cancelled")),
+            result = tokio::time::timeout_at(deadline, build) => result.unwrap_or_else(|_| Err(crate::provider::deadline_error())),
+        };
+        let mut result = if cancel.is_cancelled() {
+            CallToolResult::structured_error(
+                json!({"error":crate::error::Error::new("cancelled","tool call cancelled")}),
+            )
+        } else if tokio::time::Instant::now() >= deadline {
+            CallToolResult::structured_error(json!({"error":crate::provider::deadline_error()}))
+        } else {
+            result.unwrap_or_else(|error| CallToolResult::structured_error(json!({"error":error})))
         };
         // The complete marker is a newer protocol field; preserve the 2025 wire shape.
         result.result_type = None;

@@ -52,13 +52,30 @@ a failed call is safe to retry. Runtime never retries provider calls automatical
 The import job preserves/creates destination host identity and writes rotating
 state to `/state`. The OAuth Deployment uses `Recreate`, one replica, and a writable
 PVC. Do not scale it or reuse its credential record in another process. Ensure the
-PVC permits UID/GID 65532 to write. Credential import is explicit; it is not rerun
+PVC permits UID/GID 65532 to write. Both pods use `fsGroupChangePolicy:
+OnRootMismatch`; an owner-run init container restores file mode 0600 after mounting
+because some storage drivers add group permissions on remount. Credential import is explicit; it is not rerun
 on every pod restart. Re-import with the server stopped when reauthorization is
 needed. The platform API key still supplies classification.
 
 For Docker OAuth, use the named volume in `deploy/compose/oauth.yaml`, import into
 it with the server stopped, then start Compose. Read-only root filesystems work
 because only the explicitly mounted `/state` must be writable.
+
+For example, after local login, securely feed the credential record over stdin so
+the nonroot container can create its own owner-only transfer file:
+
+```sh
+docker volume create llm-mcp-oauth
+docker run --rm -i --read-only -v llm-mcp-oauth:/state \
+  --entrypoint /bin/sh ghcr.io/thomasquintana/llm-mcp:0.1.0 -ec \
+  'umask 077; trap "rm -f /state/import.json" EXIT; cat > /state/import.json; llm-mcp auth import /state/import.json' \
+  < "$HOME/.config/llm-mcp/auth.json"
+docker compose -f deploy/compose/oauth.yaml up -d
+```
+
+The Compose OAuth example names that volume explicitly. Give separate credential
+records/volumes to separate instances.
 
 Release Linux binaries use a Debian bookworm build baseline (glibc 2.36); container
 runtime uses the same baseline. ARM64 and x86-64 images are built natively in release

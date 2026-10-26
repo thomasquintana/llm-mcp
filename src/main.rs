@@ -43,8 +43,7 @@ enum AuthCommand {
     Import { source: PathBuf },
 }
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -53,7 +52,23 @@ async fn main() -> std::process::ExitCode {
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .init();
-    match run(Cli::parse()).await {
+    let cli = Cli::parse();
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("cannot initialize async runtime");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let result = runtime.block_on(run(cli));
+    // OAuth refreshes are explicitly joined by serve before this point. Tokio's
+    // blocking stdin reader cannot be interrupted while a client keeps its pipe
+    // open; it must not prevent process termination after transport cleanup.
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");

@@ -15,6 +15,7 @@ import tomllib
 import urllib.error
 import urllib.request
 import zipfile
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
@@ -80,7 +81,9 @@ def archive(binary, target, output, package_version):
                 for source, name in files:
                     bundle.add(source, arcname=f"{prefix}/{name}", filter=normalize)
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()
-    path.with_name(f"{path.name}.sha256").write_text(f"{checksum}  {path.name}\n")
+    path.with_name(f"{path.name}.sha256").write_text(
+        f"{checksum}  {path.name}\n", newline="\n"
+    )
     return path
 
 
@@ -104,8 +107,8 @@ def published_crate_matches(package_version, crate_path):
     return True
 
 
-def github_release(tag, directory):
-    """Resume without overwriting existing release assets or publishing early."""
+def release_assets(tag):
+    """Find or create the unpublished release staging area."""
     repo = os.environ["GITHUB_REPOSITORY"]
     result = subprocess.run(
         ["gh", "api", f"repos/{repo}/releases/tags/{tag}"],
@@ -127,40 +130,190 @@ def github_release(tag, directory):
             ],
             check=True,
         )
-        existing = {}
+        return {}
     else:
-        existing = {
-            asset["name"]: asset for asset in json.loads(result.stdout)["assets"]
-        }
-    assets = sorted(
-        path
-        for path in directory.iterdir()
-        if path.name.endswith((".tar.gz", ".zip", ".sha256"))
+        return {asset["name"]: asset for asset in json.loads(result.stdout)["assets"]}
+
+
+def file_hash(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def archive_name(package_version, target):
+    suffix = "zip" if "windows" in target else "tar.gz"
+    return f"llm-mcp-{package_version}-{target}.{suffix}"
+
+
+def expected_assets(package_version):
+    archives = {archive_name(package_version, target) for target in TARGETS}
+    return (
+        archives
+        | {f"{name}.sha256" for name in archives}
+        | {"image-amd64.tar", "image-arm64.tar", f"llm-mcp-{package_version}.crate"}
     )
-    if len([path for path in assets if path.name.endswith((".tar.gz", ".zip"))]) != len(
-        TARGETS
+
+
+def image_contents(path):
+    """Read image config identity and the actual executable from Docker save layers."""
+    with tarfile.open(path) as image:
+        manifests = json.load(image.extractfile("manifest.json"))
+        if len(manifests) != 1:
+            raise ValueError("Expected one native image in each Docker archive")
+        manifest = manifests[0]
+        config = image.extractfile(manifest["Config"]).read()
+        binary_hash = None
+        for name in reversed(manifest["Layers"]):
+            with tarfile.open(fileobj=image.extractfile(name), mode="r|*") as layer:
+                for member in layer:
+                    path_in_image = member.name.removeprefix("./")
+                    if path_in_image == "usr/local/bin/.wh.llm-mcp":
+                        raise ValueError("Image removes the server executable")
+                    if path_in_image == "usr/local/bin/llm-mcp":
+                        if not member.isfile():
+                            raise ValueError(
+                                "Server executable must be a regular image file"
+                            )
+                        binary_hash = hashlib.file_digest(
+                            layer.extractfile(member), "sha256"
+                        ).hexdigest()
+                        break
+            if binary_hash:
+                break
+        if not binary_hash:
+            raise ValueError("Image has no server executable")
+        return {
+            "config_id": f"sha256:{hashlib.sha256(config).hexdigest()}",
+            "architecture": json.loads(config)["architecture"],
+            "binary_sha256": binary_hash,
+        }
+
+
+def verify_native_image(image_path, binary_path, arch):
+    image = image_contents(image_path)
+    if image["architecture"] != arch:
+        raise ValueError("Wrong image architecture")
+    with tarfile.open(binary_path) as binary:
+        member = next(item for item in binary if item.name.endswith("/llm-mcp"))
+        actual = hashlib.file_digest(binary.extractfile(member), "sha256").hexdigest()
+    if actual != image["binary_sha256"]:
+        raise ValueError(
+            "Linux binary archive differs from the tested container executable"
+        )
+    return image
+
+
+def loaded_image_contents(image):
+    # Containerd-backed Docker may report an OCI index as image inspect .Id.
+    # Read the native config blob instead of assuming .Id is its config digest.
+    with tempfile.TemporaryDirectory(prefix="llm-mcp-loaded-image-") as temporary:
+        path = Path(temporary) / "image.tar"
+        subprocess.run(["docker", "save", "--output", str(path), image], check=True)
+        return image_contents(path)
+
+
+def build_receipt(directory, package_version, revision):
+    files = {
+        name: file_hash(directory / name)
+        for name in sorted(expected_assets(package_version))
+    }
+    for target in TARGETS:
+        name = archive_name(package_version, target)
+        if (
+            directory / f"{name}.sha256"
+        ).read_text().strip() != f"{files[name]}  {name}":
+            raise ValueError("Binary archive checksum manifest does not match")
+    images = {}
+    for arch, target in (
+        ("amd64", "x86_64-unknown-linux-gnu"),
+        ("arm64", "aarch64-unknown-linux-gnu"),
     ):
-        raise ValueError("All five binary archives are required")
-    for path in assets:
-        if path.name in existing:
-            with tempfile.TemporaryDirectory() as temp:
-                subprocess.run(
-                    [
-                        "gh",
-                        "release",
-                        "download",
-                        tag,
-                        "--pattern",
-                        path.name,
-                        "--dir",
-                        temp,
-                    ],
-                    check=True,
+        images[arch] = verify_native_image(
+            directory / f"image-{arch}.tar",
+            directory / archive_name(package_version, target),
+            arch,
+        )
+    return {
+        "version": package_version,
+        "commit": revision,
+        "files": files,
+        "images": images,
+    }
+
+
+def verify_receipt(receipt, directory, package_version, revision):
+    if receipt["version"] != package_version or receipt["commit"] != revision:
+        raise ValueError("Release receipt belongs to a different version or commit")
+    if set(receipt["files"]) != expected_assets(package_version):
+        raise ValueError("Incomplete or unexpected release artifact set")
+    for name, expected in receipt["files"].items():
+        if file_hash(directory / name) != expected:
+            raise ValueError(f"Release artifact changed: {name}")
+
+
+def download_asset(tag, name, directory):
+    subprocess.run(
+        ["gh", "release", "download", tag, "--pattern", name, "--dir", str(directory)],
+        check=True,
+    )
+
+
+def upload_verified(tag, path, existing):
+    if path.name in existing:
+        with tempfile.TemporaryDirectory() as temporary:
+            download_asset(tag, path.name, Path(temporary))
+            if file_hash(Path(temporary) / path.name) != file_hash(path):
+                raise ValueError(
+                    f"Existing release asset differs: {path.name}; resume with the original build artifacts"
                 )
-                if (Path(temp) / path.name).read_bytes() != path.read_bytes():
-                    raise ValueError(f"Existing release asset differs: {path.name}")
-        else:
-            subprocess.run(["gh", "release", "upload", tag, str(path)], check=True)
+    else:
+        subprocess.run(["gh", "release", "upload", tag, str(path)], check=True)
+
+
+def prepare_release(directory, package_version, revision):
+    """Freeze one artifact set before any registry publication; reuse it on retries."""
+    tag = f"v{package_version}"
+    existing = release_assets(tag)
+    if "receipt.json" in existing:
+        with tempfile.TemporaryDirectory() as temporary:
+            original = Path(temporary)
+            download_asset(tag, "receipt.json", original)
+            receipt = json.loads((original / "receipt.json").read_text())
+            if (
+                receipt["version"] != package_version
+                or receipt["commit"] != revision
+                or set(receipt["files"]) != expected_assets(package_version)
+            ):
+                raise ValueError(
+                    "Existing immutable release receipt does not match this release"
+                )
+            for name in receipt["files"]:
+                download_asset(tag, name, original)
+            verify_receipt(receipt, original, package_version, revision)
+            for name in [*receipt["files"], "receipt.json"]:
+                shutil.copyfile(original / name, directory / name)
+    else:
+        crate = ROOT / "target/package" / f"llm-mcp-{package_version}.crate"
+        shutil.copyfile(crate, directory / crate.name)
+        receipt = build_receipt(directory, package_version, revision)
+        for name in receipt["files"]:
+            upload_verified(tag, directory / name, existing)
+        path = directory / "receipt.json"
+        path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+        upload_verified(tag, path, existing)
+    verify_receipt(receipt, directory, package_version, revision)
+
+
+def github_release(tag, directory):
+    """Finalize only the frozen, verified artifact set after registry jobs succeed."""
+    receipt = json.loads((directory / "receipt.json").read_text())
+    verify_receipt(receipt, directory, version(), os.environ["GITHUB_SHA"])
+    with tempfile.TemporaryDirectory() as temporary:
+        download_asset(tag, "receipt.json", Path(temporary))
+        if file_hash(Path(temporary) / "receipt.json") != file_hash(
+            directory / "receipt.json"
+        ):
+            raise ValueError("Remote release receipt changed")
     subprocess.run(["gh", "release", "edit", tag, "--draft=false"], check=True)
 
 
@@ -174,7 +327,15 @@ def main():
     bundle.add_argument("--binary", type=Path, required=True)
     bundle.add_argument("--target", required=True)
     bundle.add_argument("--output", type=Path, default=ROOT / "dist")
+    image = commands.add_parser("verify-image")
+    image.add_argument("--image-archive", type=Path, required=True)
+    image.add_argument("--binary-archive", type=Path, required=True)
+    image.add_argument("--arch", choices=["amd64", "arm64"], required=True)
+    loaded = commands.add_parser("verify-loaded-image")
+    loaded.add_argument("--image", required=True)
     commands.add_parser("publish-crate")
+    prepare = commands.add_parser("prepare")
+    prepare.add_argument("--directory", type=Path, default=ROOT / "dist")
     github = commands.add_parser("github")
     github.add_argument("--directory", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
@@ -195,11 +356,30 @@ def main():
                 output.write(values)
     elif args.command == "archive":
         print(archive(args.binary, args.target, args.output, package_version))
+    elif args.command == "verify-image":
+        print(
+            json.dumps(
+                verify_native_image(args.image_archive, args.binary_archive, args.arch),
+                indent=2,
+            )
+        )
+    elif args.command == "verify-loaded-image":
+        print(json.dumps(loaded_image_contents(args.image), indent=2))
     elif args.command == "publish-crate":
-        subprocess.run(["cargo", "package", "--locked"], check=True)
-        crate = ROOT / "target/package" / f"llm-mcp-{package_version}.crate"
-        if not published_crate_matches(package_version, crate):
+        directory = ROOT / "dist"
+        receipt = json.loads((directory / "receipt.json").read_text())
+        verify_receipt(receipt, directory, package_version, os.environ["GITHUB_SHA"])
+        prepared = directory / f"llm-mcp-{package_version}.crate"
+        if not published_crate_matches(package_version, prepared):
+            subprocess.run(["cargo", "package", "--locked"], check=True)
+            crate = ROOT / "target/package" / prepared.name
+            if file_hash(crate) != file_hash(prepared):
+                raise ValueError(
+                    "Repackaged crate differs from the immutable release set"
+                )
             subprocess.run(["cargo", "publish", "--locked"], check=True)
+    elif args.command == "prepare":
+        prepare_release(args.directory, package_version, os.environ["GITHUB_SHA"])
     elif args.command == "github":
         github_release(f"v{package_version}", args.directory)
 

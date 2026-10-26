@@ -11,3 +11,5 @@ All notable changes follow Semantic Versioning.
 - Add a standalone nonroot container, Compose examples and Kubernetes API-key/OAuth deployments.
 - Add cross-platform CI, dependency/license gates, coverage and automated crate/binary/container release workflows.
 - Use AWS-LC for JWT validation and require issuer, audience, subject and expiry claims.
+- Harden OAuth rotation recovery, shutdown, Windows credential ACLs, CPU deadlines and SSE parsing with regression coverage.
+- Freeze release artifact receipts and recover interrupted image aliases without replacing published versions.

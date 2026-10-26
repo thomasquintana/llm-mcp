@@ -267,7 +267,10 @@ async fn rejects_malformed_json_from_provider() {
     let task = tokio::spawn(async move {
         axum::serve(
             listener,
-            Router::new().route("/v1/responses", post(|| async { "{broken" })),
+            Router::new().route(
+                "/v1/responses",
+                post(|| async { ([("x-request-id", "req-malformed")], "{broken") }),
+            ),
         )
         .await
         .unwrap();
@@ -283,5 +286,34 @@ async fn rejects_malformed_json_from_provider() {
         .call(Operation::Generate, json!({}), CancellationToken::new())
         .await;
     task.abort();
-    assert_eq!(result.unwrap_err().code, "provider_protocol");
+    let error = result.unwrap_err();
+    assert_eq!(error.code, "provider_protocol");
+    assert_eq!(error.request_id.as_deref(), Some("req-malformed"));
+    assert_eq!(error.status, Some(200));
+}
+
+#[tokio::test]
+async fn expensive_json_work_cannot_publish_success_after_deadline() {
+    let response = json!({"status":"completed","output": vec![false;750_000]});
+    let f = fixture(
+        response,
+        StatusCode::OK,
+        Duration::ZERO,
+        &[("LLM_MCP_TIMEOUT_MS", "10")],
+    )
+    .await;
+    let server = McpServer::new(f.provider.clone());
+    let result = server
+        .invoke(
+            "generate",
+            json!({"input":"large output"}),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(
+        result.structured_content.unwrap()["error"]["code"],
+        "timeout"
+    );
 }
