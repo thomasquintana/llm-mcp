@@ -1,5 +1,6 @@
 //! Stateless OpenAI generation and classification over the Model Context Protocol.
 
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod mcp;

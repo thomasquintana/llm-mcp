@@ -1,6 +1,9 @@
 //! Bounded OpenAI HTTP requests, preserving provider JSON.
 
+mod sse;
+
 use crate::{
+    auth::OAuthSession,
     config::{AuthMode, Config},
     error::{Error, Result},
 };
@@ -26,6 +29,7 @@ pub struct Provider {
     pub config: Arc<Config>,
     client: Client,
     slots: Arc<Semaphore>,
+    oauth: Option<Arc<OAuthSession>>,
 }
 
 impl Provider {
@@ -37,10 +41,19 @@ impl Provider {
             .build()
             .map_err(Error::transport)?;
         let slots = Arc::new(Semaphore::new(config.concurrency));
+        let oauth = if config.generate_auth == AuthMode::OAuth {
+            Some(Arc::new(OAuthSession::open(
+                &config.credentials_path,
+                client.clone(),
+            )?))
+        } else {
+            None
+        };
         Ok(Self {
             config: Arc::new(config),
             client,
             slots,
+            oauth,
         })
     }
 
@@ -79,19 +92,24 @@ impl Provider {
         }
     }
 
-    async fn execute(&self, operation: Operation, arguments: Value) -> Result<Value> {
-        if operation == Operation::Generate && self.config.generate_auth == AuthMode::OAuth {
-            return Err(Error::new(
-                "authentication",
-                "OAuth credentials are not initialized",
-            ));
-        }
-        let key = self.config.api_key.as_deref().ok_or_else(|| {
-            Error::new(
-                "authentication",
-                "OPENAI_API_KEY is required for this operation",
-            )
-        })?;
+    async fn execute(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
+        let oauth =
+            operation == Operation::Generate && self.config.generate_auth == AuthMode::OAuth;
+        let key = if oauth {
+            prepare_oauth(&mut arguments)?;
+            self.oauth
+                .as_ref()
+                .expect("OAuth initialized")
+                .access_token()
+                .await?
+        } else {
+            self.config.api_key.clone().ok_or_else(|| {
+                Error::new(
+                    "authentication",
+                    "OPENAI_API_KEY is required for this operation",
+                )
+            })?
+        };
         let endpoint = if operation == Operation::Generate {
             "responses"
         } else {
@@ -106,12 +124,19 @@ impl Provider {
             .client
             .post(url)
             .bearer_auth(key)
-            .header(header::ACCEPT, "application/json")
+            .header(
+                header::ACCEPT,
+                if oauth {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
             .json(&arguments);
-        if let Some(value) = &self.config.organization {
+        if !oauth && let Some(value) = &self.config.organization {
             request = request.header("OpenAI-Organization", value);
         }
-        if let Some(value) = &self.config.project {
+        if !oauth && let Some(value) = &self.config.project {
             request = request.header("OpenAI-Project", value);
         }
         let response = request.send().await.map_err(Error::transport)?;
@@ -135,6 +160,9 @@ impl Provider {
             error.request_id = request_id;
             error.retryable = status.as_u16() == 429 || status.is_server_error();
             return Err(error);
+        }
+        if oauth {
+            return sse::collect(response, self.config.max_response_bytes).await;
         }
         let bytes = read_bounded(response, self.config.max_response_bytes).await?;
         let value: Value = serde_json::from_slice(&bytes)
@@ -163,6 +191,55 @@ impl Provider {
         }
         Ok(value)
     }
+}
+
+fn prepare_oauth(arguments: &mut Value) -> Result<()> {
+    for field in [
+        "conversation",
+        "max_output_tokens",
+        "max_tool_calls",
+        "metadata",
+        "moderation",
+        "multi_agent",
+        "prompt",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "temperature",
+        "top_logprobs",
+        "top_p",
+        "truncation",
+        "user",
+        "previous_response_id",
+    ] {
+        if arguments.get(field).is_some() {
+            return Err(Error::new(
+                "unsupported_oauth_option",
+                format!(
+                    "{field} is not supported by ChatGPT plan OAuth; select API-key authentication to use standard API options"
+                ),
+            ));
+        }
+    }
+    if arguments
+        .get("store")
+        .is_some_and(|v| v != &Value::Bool(false))
+    {
+        return Err(Error::new(
+            "unsupported_oauth_option",
+            "ChatGPT OAuth requires store:false",
+        ));
+    }
+    if !arguments.get("input").is_some_and(Value::is_array) {
+        return Err(Error::new(
+            "unsupported_oauth_option",
+            "ChatGPT OAuth requires input as an array containing full context",
+        ));
+    }
+    let object = arguments.as_object_mut().expect("validated object");
+    object.remove("background");
+    object.insert("store".into(), Value::Bool(false));
+    object.insert("stream".into(), Value::Bool(true));
+    Ok(())
 }
 
 /// Validate server-level restrictions without restricting future provider fields.

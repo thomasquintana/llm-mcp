@@ -41,7 +41,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 5. Mock-provider tests: unknown fields, full history, function call output, schema settings, refusal batches, HTTP auth/headers, rate limits/timeouts/malformed/oversized bodies and option rejection before dispatch.
 6. Run gates, update plan, commit.
 
-## Task 3 — OAuth lifecycle [IN PROGRESS]
+## Task 3 — OAuth lifecycle [COMPLETE]
 
 1. Implement protected credential records and host identity, atomic rotation, exclusive process ownership and safe import/logout/status.
 2. Implement documented OpenAI dynamic OSS registration and PKCE loopback login, browser URL, state/nonce validation, OIDC discovery/JWKS signature/issuer/audience/expiry validation, explicit granted scopes and token exchange.
@@ -50,7 +50,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 5. Tests for PKCE/callback failures, token validation, import/host preservation, refresh single-flight/rotation/restart, credential permissions, and SSE splits/failure/incomplete/truncation.
 6. Run gates, update plan, commit.
 
-## Task 4 — transports and htlk [PENDING]
+## Task 4 — transports and htlk [IN PROGRESS]
 
 1. Wire serve stdio and Streamable HTTP with protocol 2025-11-25, JSON responses where supported, health endpoints, signal shutdown and cancellation.
 2. Provide htlk catalog exporter, pinned generated catalogs and example source/endpoint configurations for generation, function continuation and classification.
@@ -96,3 +96,4 @@ Additional policy/deployment/workflow checks are added as their artifacts are in
 - Release research: htlk baseline has strong Rust/package/license gates but binary/container delivery must be added. Never publish just because release workflow is implemented.
 - Task 1 complete: git initialized on main; specification/package/toolchain/license added. Format, Clippy, regression test, warning-free rustdoc and verified Cargo packaging all passed. Plan reviewed before foundation commit.
 - Task 2 complete: environment parser, bounded provider calls and MCP descriptors/handlers implemented. Nine regression tests pass (identity plus eight provider/config tests), including malformed JSON, size bounds, cancel/deadline, exact history/options/response preservation and background/stream rejection before dispatch. Format, Clippy, rustdoc and package verification passed. OAuth dispatch remains intentionally implemented in Task 3; transport wiring in Task 4.
+- Task 3 complete: OAuth lifecycle/store/CLI and internal SSE implemented; 17 tests pass, including RSA positive/negative identity validation, callback state, RFC PKCE vector, exclusive ownership, import/permissions, durable single-flight refresh surviving cancellation, OAuth-vs-key dispatch and SSE byte splits/terminal errors. All required gates pass. OpenAI fixed published issuer/JWKS endpoints are used rather than configurable discovery: they were checked against live issuer metadata and keep trust pinned to OpenAI. Real account login is opt-in and was not attempted without user credentials.
