@@ -1,0 +1,34 @@
+ir_version = "0.1"
+
+-- The caller selects a function_call item from an earlier generate result and
+-- executes that function. This follow-up graph supplies its result to the model.
+graph function_continuation {
+    inputs = { model = string, user = json, call = json, function_result = string }
+    outputs = { response = json }
+
+    nodes {
+        arguments = eval(json, {
+            model = inputs.model,
+            store = false,
+            input = [
+                inputs.user,
+                inputs.call,
+                { type = "function_call_output", call_id = inputs.call.call_id, output = inputs.function_result },
+            ],
+        }) {
+            inputs = { model = string, user = json, call = json, function_result = string }
+        }
+        generate = call(mcp.tool("llm", "generate"))
+    }
+
+    edges {
+        edge model { from = inputs.model to = arguments.inputs.model }
+        edge user { from = inputs.user to = arguments.inputs.user }
+        edge call { from = inputs.call to = arguments.inputs.call }
+        edge function_result { from = inputs.function_result to = arguments.inputs.function_result }
+        edge arguments { from = arguments.outputs.value to = generate.inputs.arguments }
+        edge response { from = generate.outputs.value to = outputs.response }
+    }
+
+    limits { max_mcp_calls = 1 }
+}

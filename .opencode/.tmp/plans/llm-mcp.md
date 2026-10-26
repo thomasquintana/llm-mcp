@@ -50,7 +50,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 5. Tests for PKCE/callback failures, token validation, import/host preservation, refresh single-flight/rotation/restart, credential permissions, and SSE splits/failure/incomplete/truncation.
 6. Run gates, update plan, commit.
 
-## Task 4 — transports and htlk [IN PROGRESS]
+## Task 4 — transports and htlk [COMPLETE]
 
 1. Wire serve stdio and Streamable HTTP with protocol 2025-11-25, JSON responses where supported, health endpoints, signal shutdown and cancellation.
 2. Provide htlk catalog exporter, pinned generated catalogs and example source/endpoint configurations for generation, function continuation and classification.
@@ -58,7 +58,7 @@ One package, lib.rs and main.rs. config.rs/error.rs; provider/ for HTTP and SSE;
 4. Verify actual htlk integration where local sibling permits; record exact compatibility and response-size guidance in docs.
 5. Run gates, update plan, commit.
 
-## Task 5 — containers and deployment [PENDING]
+## Task 5 — containers and deployment [IN PROGRESS]
 
 1. Add Dockerfile, dockerignore, Compose and standalone Docker examples using same image for HTTP/stdio.
 2. Add plain K8s Deployment/Service/probe/resource/Secret references, OAuth PVC/Recreate/single-replica example and host-aware credential import procedure.
@@ -97,3 +97,4 @@ Additional policy/deployment/workflow checks are added as their artifacts are in
 - Task 1 complete: git initialized on main; specification/package/toolchain/license added. Format, Clippy, regression test, warning-free rustdoc and verified Cargo packaging all passed. Plan reviewed before foundation commit.
 - Task 2 complete: environment parser, bounded provider calls and MCP descriptors/handlers implemented. Nine regression tests pass (identity plus eight provider/config tests), including malformed JSON, size bounds, cancel/deadline, exact history/options/response preservation and background/stream rejection before dispatch. Format, Clippy, rustdoc and package verification passed. OAuth dispatch remains intentionally implemented in Task 3; transport wiring in Task 4.
 - Task 3 complete: OAuth lifecycle/store/CLI and internal SSE implemented; 17 tests pass, including RSA positive/negative identity validation, callback state, RFC PKCE vector, exclusive ownership, import/permissions, durable single-flight refresh surviving cancellation, OAuth-vs-key dispatch and SSE byte splits/terminal errors. All required gates pass. OpenAI fixed published issuer/JWKS endpoints are used rather than configurable discovery: they were checked against live issuer metadata and keep trust pinned to OpenAI. Real account login is opt-in and was not attempted without user credentials.
+- Task 4 complete: both transports, health/shutdown, wire cancellation and exact catalog export implemented. Twenty Rust regressions pass, plus catalog drift checks and four real sibling htlk compiler/runtime executions (generation/classification and continuation on each transport). Static analysis, rustdoc and package gates passed. Legacy HTTP MCP sessions are required for cross-request cancellation; they contain protocol metadata only. HTLK supports completed SSE transport responses. API-key replica deployment therefore needs session affinity, documented and planned in Service manifests.

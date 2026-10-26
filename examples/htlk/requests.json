@@ -1,0 +1,17 @@
+{
+  "generation": {
+    "model": "gpt-6.1-sol",
+    "input": [{"role": "user", "content": "Say hello."}],
+    "reasoning": {"effort": "low"},
+    "store": false
+  },
+  "classification": {
+    "model": "gpt-6-luna",
+    "input": "Please refund the duplicate charge.",
+    "questions": [
+      {"name": "refund", "type": "predicate", "instructions": "Does the customer request a refund?"},
+      {"name": "department", "type": "choice", "instructions": "Which department should handle this?", "choices": [{"value": "billing", "description": "Payments and refunds."}, {"value": "other", "description": "Other topics."}]},
+      {"name": "urgency", "type": "score", "instructions": "How urgent is the request?", "levels": [{"label": "routine", "description": "No urgency expressed."}, {"label": "urgent", "description": "Immediate attention requested."}]}
+    ]
+  }
+}

@@ -1,11 +1,7 @@
 //! Command-line entry point for llm-mcp.
 
 use clap::{Parser, Subcommand};
-use llm_mcp::{
-    auth,
-    config::Config,
-    error::{Error, Result},
-};
+use llm_mcp::{auth, config::Config, error::Result};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -29,7 +25,14 @@ enum Command {
         command: AuthCommand,
     },
     /// Export exact MCP descriptors and identity.
-    Catalog,
+    Catalog {
+        /// Emit HTLK catalog inputs rather than plain MCP descriptors.
+        #[arg(long)]
+        htlk: bool,
+        /// Transport recorded in an exported HTLK catalog.
+        #[arg(long, default_value = "stdio", value_parser = ["stdio", "streamable_http"])]
+        transport: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -61,19 +64,21 @@ async fn main() -> std::process::ExitCode {
 
 async fn run(cli: Cli) -> Result<()> {
     let command = cli.command.unwrap_or(Command::Serve);
-    if matches!(command, Command::Catalog) {
+    if let Command::Catalog { htlk, transport } = &command {
+        let catalog = if *htlk {
+            llm_mcp::mcp::htlk_catalog(transport)
+        } else {
+            llm_mcp::mcp::catalog()
+        };
         println!(
             "{}",
-            serde_json::to_string_pretty(&llm_mcp::mcp::catalog()).expect("static catalog")
+            serde_json::to_string_pretty(&catalog).expect("static catalog")
         );
         return Ok(());
     }
     let config = Config::from_env()?;
     match command {
-        Command::Serve => Err(Error::new(
-            "configuration",
-            "transport wiring is not initialized",
-        )),
+        Command::Serve => llm_mcp::runtime::serve(config).await,
         Command::Login => auth::login(&config.credentials_path).await,
         Command::Logout => auth::logout(&config.credentials_path),
         Command::Auth {
@@ -89,6 +94,6 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Auth {
             command: AuthCommand::Import { source },
         } => auth::import(&config.credentials_path, &source),
-        Command::Catalog => unreachable!("handled above"),
+        Command::Catalog { .. } => unreachable!("handled above"),
     }
 }

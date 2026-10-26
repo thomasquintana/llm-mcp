@@ -125,3 +125,17 @@ pub fn tools() -> Vec<Tool> {
 pub fn catalog() -> Value {
     json!({"protocolVersion":crate::MCP_PROTOCOL_VERSION, "serverInfo":server_info().server_info, "tools":tools()})
 }
+
+/// Export HTLK's catalog input format for the selected deployment transport.
+pub fn htlk_catalog(transport: &str) -> Value {
+    json!({
+        "tools": {
+            "catalog_version":"0.1", "mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,
+            "servers":{"llm":{"deployment_id":"llm-mcp", "transport":transport, "implementation_name":"llm-mcp", "implementation_version":VERSION}},
+            "schema_documents":{},
+            "tools": tools().into_iter().map(|descriptor| json!({"server":"llm", "descriptor":descriptor})).collect::<Vec<_>>()
+        },
+        "resources":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"resources":[],"templates":[]},
+        "prompts":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"prompts":[]}
+    })
+}

@@ -20,6 +20,8 @@ pub struct Config {
     pub transport: String,
     /// HTTP listener.
     pub bind: SocketAddr,
+    /// Host authorities accepted by the HTTP transport.
+    pub allowed_hosts: Vec<String>,
     /// Base URL including `/v1/`.
     pub base_url: Url,
     /// Platform key, used for classification and API-key generation.
@@ -113,6 +115,13 @@ impl Config {
         Ok(Self {
             transport,
             bind,
+            allowed_hosts: get("LLM_MCP_ALLOWED_HOSTS")
+                .unwrap_or_else(|| "localhost,127.0.0.1,::1".into())
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect(),
             base_url,
             generate_auth,
             api_key: get("OPENAI_API_KEY").filter(|s| !s.is_empty()),

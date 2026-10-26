@@ -1,0 +1,21 @@
+ir_version = "0.1"
+
+-- Requests contain full OpenAI request bodies. Results remain full provider JSON.
+graph llm_workflow {
+    inputs = { generation = json, classification = json }
+    outputs = { generated = json, classified = json }
+
+    nodes {
+        generate = call(mcp.tool("llm", "generate"))
+        classify = call(mcp.tool("llm", "classify"))
+    }
+
+    edges {
+        edge generation { from = inputs.generation to = generate.inputs.arguments }
+        edge classification { from = inputs.classification to = classify.inputs.arguments }
+        edge generated { from = generate.outputs.value to = outputs.generated }
+        edge classified { from = classify.outputs.value to = outputs.classified }
+    }
+
+    limits { max_mcp_calls = 2 }
+}

@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod mcp;
 pub mod provider;
+pub mod runtime;
 
 /// The package version used in MCP server identity and catalogs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
