@@ -5,6 +5,7 @@ All notable changes follow Semantic Versioning.
 ## Unreleased
 
 - Accept valid OpenAI OAuth event streams with an omitted Content-Type header while retaining terminal-event and size validation.
+- Assemble complete OAuth outputs from indexed completed-item events when the terminal response omits them, preserving text and function-call fields.
 
 - Establish the Rust package and stateless MCP server specification.
 - Add environment configuration, bounded OpenAI requests and stable generation/classification MCP contracts.

@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use reqwest::Response;
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Default)]
 struct Decoder {
@@ -10,6 +11,8 @@ struct Decoder {
     scan: usize,
     consumed: usize,
     data: Vec<u8>,
+    expected_items: BTreeSet<usize>,
+    completed_items: BTreeMap<usize, Value>,
 }
 
 impl Decoder {
@@ -32,6 +35,30 @@ impl Decoder {
                 let event: Value = serde_json::from_slice(&data)
                     .map_err(|_| Error::new("provider_protocol", "invalid OAuth SSE event JSON"))?;
                 match event.get("type").and_then(Value::as_str) {
+                    Some("response.output_item.added") => {
+                        self.expected_items.insert(output_index(&event)?);
+                    }
+                    Some("response.output_item.done") => {
+                        let index = output_index(&event)?;
+                        let item = event
+                            .get("item")
+                            .filter(|item| item.is_object())
+                            .ok_or_else(|| {
+                                Error::new("provider_protocol", "invalid completed output item")
+                            })?;
+                        if self
+                            .completed_items
+                            .get(&index)
+                            .is_some_and(|previous| previous != item)
+                        {
+                            return Err(Error::new(
+                                "provider_protocol",
+                                "conflicting completed output items",
+                            ));
+                        }
+                        self.expected_items.insert(index);
+                        self.completed_items.insert(index, item.clone());
+                    }
                     Some("response.completed") => {
                         let response = event
                             .get("response")
@@ -42,7 +69,7 @@ impl Decoder {
                             .ok_or_else(|| {
                                 Error::new("provider_protocol", "invalid completed response event")
                             })?;
-                        return Ok(Some(response.clone()));
+                        return self.finish(response.clone()).map(Some);
                     }
                     Some("response.failed" | "response.incomplete" | "error") => {
                         return Err(Error::new(
@@ -66,6 +93,53 @@ impl Decoder {
         }
         Ok(None)
     }
+
+    fn finish(&mut self, mut response: Value) -> Result<Value> {
+        // Some live OAuth terminal events carry metadata/usage but omit output.
+        // Completed item events are full provider snapshots, including function
+        // arguments and future fields; retain them rather than discard the answer.
+        let output_missing = response
+            .get("output")
+            .is_none_or(|output| output.is_null() || output.as_array().is_some_and(Vec::is_empty));
+        if output_missing && !self.expected_items.is_empty() {
+            if self
+                .expected_items
+                .iter()
+                .any(|index| !self.completed_items.contains_key(index))
+            {
+                return Err(Error::new(
+                    "provider_incomplete",
+                    "OAuth stream omitted a completed output item",
+                ));
+            }
+            let mut output = Vec::with_capacity(self.completed_items.len());
+            for (expected, (index, item)) in std::mem::take(&mut self.completed_items)
+                .into_iter()
+                .enumerate()
+            {
+                if index != expected {
+                    return Err(Error::new(
+                        "provider_incomplete",
+                        "OAuth stream has incomplete output indices",
+                    ));
+                }
+                output.push(item);
+            }
+            response
+                .as_object_mut()
+                .expect("validated response object")
+                .insert("output".into(), Value::Array(output));
+        }
+        Ok(response)
+    }
+}
+
+fn output_index(event: &Value) -> Result<usize> {
+    event
+        .get("output_index")
+        .and_then(Value::as_u64)
+        .and_then(|index| usize::try_from(index).ok())
+        .ok_or_else(|| Error::new("provider_protocol", "invalid output item index"))
 }
 
 /// Collect an OAuth stream until its required completed terminal event.
@@ -163,5 +237,56 @@ mod tests {
             }
         }
         assert_eq!(result.unwrap()["padding"], padding);
+    }
+
+    #[test]
+    fn reconstructs_output_omitted_from_live_oauth_terminal_response() {
+        let item = serde_json::json!({"id":"msg_live","type":"message","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"llm-mcp OAuth OK.","annotations":[],"logprobs":[]}]});
+        let mut expected = serde_json::json!({"id":"resp_live","status":"completed","output":[],"usage":{"output_tokens":11},"future_terminal_field":true});
+        let wire = [
+            serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"id":"msg_live","type":"message","status":"in_progress","content":[]}}),
+            serde_json::json!({"type":"response.output_item.done","output_index":0,"item":item}),
+            serde_json::json!({"type":"response.completed","response":expected}),
+        ].into_iter().map(|event| format!("data: {event}\n\n")).collect::<String>();
+        let result = Decoder::default().push(wire.as_bytes()).unwrap().unwrap();
+        expected["output"] = serde_json::json!([item]);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn completed_function_items_are_preserved_in_output_index_order() {
+        let call = serde_json::json!({"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"Rust\"}","future_item_field":true});
+        let message = serde_json::json!({"type":"message","content":[{"type":"output_text","text":"Looking it up."}]});
+        let wire = [
+            serde_json::json!({"type":"response.output_item.done","output_index":1,"item":message}),
+            serde_json::json!({"type":"response.output_item.done","output_index":0,"item":call}),
+            serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[]}}),
+        ].into_iter().map(|event|format!("data: {event}\n\n")).collect::<String>();
+        let result = Decoder::default().push(wire.as_bytes()).unwrap().unwrap();
+        assert_eq!(result["output"], serde_json::json!([call, message]));
+    }
+
+    #[test]
+    fn missing_or_conflicting_output_items_are_not_successes() {
+        let cases = [
+            vec![
+                serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}),
+            ],
+            vec![
+                serde_json::json!({"type":"response.output_item.done","output_index":1,"item":{"type":"message"}}),
+            ],
+            vec![
+                serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}),
+                serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"different"}}),
+            ],
+        ];
+        for mut events in cases {
+            events.push(serde_json::json!({"type":"response.completed","response":{"status":"completed","output":[]}}));
+            let wire = events
+                .into_iter()
+                .map(|event| format!("data: {event}\n\n"))
+                .collect::<String>();
+            assert!(Decoder::default().push(wire.as_bytes()).is_err());
+        }
     }
 }

@@ -89,6 +89,17 @@ def exercise(container):
         )
         assert not response["result"]["isError"], response
         assert isinstance(response["result"]["structuredContent"], dict)
+        value = response["result"]["structuredContent"]
+        if tool == "generate":
+            text = "".join(
+                part.get("text", "")
+                for item in value["output"]
+                for part in item.get("content", [])
+                if part.get("type") == "output_text"
+            )
+            assert text == "Hello", "successful generation must retain its output text"
+        else:
+            assert value["answers"][0]["probability"] == 0.95
 
 
 def start(image, port, extra=()):

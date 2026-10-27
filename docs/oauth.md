@@ -66,6 +66,11 @@ errors. The stream byte limit counts all events, not just the final response.
 Live OpenAI responses may omit `Content-Type`; the collector accepts that case
 only when the body supplies valid SSE data and a completed terminal response.
 An explicit incompatible media type remains an error.
+Some live terminal events contain usage/metadata with an empty `output` array.
+The collector reconstructs that array from complete `response.output_item.done`
+snapshots in output-index order, preserving message/function-call fields. When
+reconstruction is needed, missing/gapped snapshots fail instead of returning a
+partial answer; conflicting item snapshots are always rejected.
 
 The server explicitly rejects currently documented unsupported OAuth fields:
 `conversation`, `previous_response_id`, `max_output_tokens`, `max_tool_calls`,

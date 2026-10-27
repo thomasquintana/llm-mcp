@@ -21,7 +21,7 @@ in docs/verification.md. Do not publish registries or push git.
    observed wire response. Add a regression demonstrating the actual failure and
    preserve bounds, completed-result semantics and error handling. Review plan and
    run format/Clippy/tests/rustdoc before committing any code task.
-3. [IN PROGRESS] Repeat the minimal live MCP generation call, update durable evidence,
+3. [VERIFIED; COMMIT/CLEANUP REMAINING] Repeat the minimal live MCP generation call, update durable evidence,
    complete regression/static/package gates, inspect git status/diff/log, commit
    intended changes and remove this temporary plan in a final gated cleanup commit.
 
@@ -40,3 +40,24 @@ in docs/verification.md. Do not publish registries or push git.
   tolerates an absent Content-Type, matches present SSE media types correctly,
   and still rejects incompatible types, truncated/non-SSE bodies and oversized
   streams. All 31 Rust regressions, formatting, Clippy and rustdoc pass.
+- After header fix, real OAuth MCP calls complete with usage.output_tokens:11,
+  but the terminal response has output:[] and the expected text is missing. Need
+  to inspect completed output-item/content events and assemble the full response
+  like a local streaming SDK before final acceptance. Do not treat status alone
+  as a successful end-to-end generation test.
+- Output diagnosis: response.output_item.done contains the complete assistant
+  message, including output_text and phase:final_answer. Assembler now retains
+  these indexed snapshots when terminal output is empty/omitted. A regression
+  failed before this fix; output ordering/function fields/incomplete snapshots
+  are also covered. All 34 Rust tests and Clippy pass.
+- Live end-to-end stdio MCP call now passes: model gpt-6.1-sol, completed, exact
+  text "llm-mcp OAuth OK.", usage 17 input/11 output/28 total tokens. No API-key
+  fallback and no further live generation calls are needed. Finish coverage,
+   minimum-toolchain/package checks, durable evidence and cleanup/commit.
+- Final gates passed: 34 Rust regressions and Clippy on Rust 1.98/1.99.1,
+  rustdoc/format checks, 12 tooling tests/Ruff, coverage 81.70%, Cargo packaging,
+  dependency/license/notice/catalog checks, actionlint and real sibling HTLK
+  workflows over both transports. Rebuilt local container passes a faithful mock
+  of both live OAuth behaviors and asserts generated text. Durable evidence updated
+  in docs/verification.md. Commit the output assembly/evidence, then remove this
+  plan in a final gated cleanup commit; no additional live requests are needed.

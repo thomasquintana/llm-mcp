@@ -44,15 +44,29 @@ class Provider(http.server.BaseHTTPRequestHandler):
                 ]
             }
         )
-        body = (
-            f"data: {json.dumps({'type': 'response.completed', 'response': response})}\n\n"
-            if oauth
-            else json.dumps(response)
-        ).encode()
+        if oauth:
+            # Match live OAuth: no Content-Type and metadata-only terminal output.
+            events = [
+                {
+                    "type": "response.output_item.added",
+                    "output_index": 0,
+                    "item": {"type": "message", "content": []},
+                },
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": response["output"][0],
+                },
+                {"type": "response.completed", "response": {**response, "output": []}},
+            ]
+            body = "".join(
+                f"data: {json.dumps(event)}\n\n" for event in events
+            ).encode()
+        else:
+            body = json.dumps(response).encode()
         self.send_response(200)
-        self.send_header(
-            "Content-Type", "text/event-stream" if oauth else "application/json"
-        )
+        if not oauth:
+            self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

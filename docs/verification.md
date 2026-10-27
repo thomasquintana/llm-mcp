@@ -5,12 +5,12 @@ and Rust 1.99.1 (current stable), plus a native Linux ARM64 Docker runtime.
 
 ## Completed checks
 
-- **30 Rust regressions** pass on both toolchains, including independent stdio and
+- **34 Rust regressions** pass on both toolchains, including independent stdio and
   HTTP JSON-RPC tests. Formatting and all-target/all-feature Clippy pass with
   warnings denied. Rustdoc builds with warnings denied.
 - **12 Python tooling regressions** pass, along with Ruff checks/formatting and
   actionlint 1.7.12 workflow analysis.
-- LLVM line coverage is **80.37%**, above the required 70% floor. Child-process
+- LLVM line coverage is **81.70%**, above the required 70% floor. Child-process
   instrumentation is preserved without inheriting application configuration.
 - Dependency advisory/source/license policy, generated notice comparison and
   exported HTLK catalog drift checks pass. JWT validation uses AWS-LC; no advisory
@@ -54,9 +54,20 @@ commit alias publication without replacement.
 
 ## External execution
 
-Live browser authorization and real OpenAI model access require the operator's
-account. No real credentials were used by the acceptance suite. Kubernetes schema
-and container-volume checks are not a deployment to a live cluster. Registry
+After operator-completed login, a real stdio MCP `generate` request using ChatGPT
+OAuth and `gpt-6.1-sol` completed with the exact output `llm-mcp OAuth OK.`. That
+request used 17 input tokens and 11 output tokens, with no API-key fallback.
+
+The live check exposed two provider behaviors now covered by regressions: an
+omitted SSE Content-Type and an empty terminal output snapshot despite complete
+output-item events. The collector accepts the missing header, assembles completed
+output items in index order, and still rejects truncated, oversized, incomplete
+or incompatible streams. The container mock now reproduces these live wire shapes
+and asserts actual generated text rather than merely a successful result object.
+
+The automated acceptance suite continues to use mock credentials; live API-key
+generation/classification and browser UI testing require separate operator checks.
+Kubernetes schema and container-volume checks are not a deployment to a live cluster. Registry
 publication and the remaining native release-platform builds require repository
 CI, trusted-publisher/GHCR permissions and the configured runners; they were not
 performed during this local acceptance run. See [release setup](releases.md).
