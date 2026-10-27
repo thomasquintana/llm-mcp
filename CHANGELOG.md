@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Select mutually exclusive server-wide authentication with `LLM_MCP_AUTH`; OAuth exposes only generation, and catalogs reflect the selected mode.
+
 - Accept valid OpenAI OAuth event streams with an omitted Content-Type header while retaining terminal-event and size validation.
 - Assemble complete OAuth outputs from indexed completed-item events when the terminal response omits them, preserving text and function-call fields.
 

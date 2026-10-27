@@ -531,7 +531,7 @@ fn pkce_uses_sha256_base64url_and_unique_secrets() {
 }
 
 #[tokio::test]
-async fn oauth_generation_uses_internal_stream_and_classification_uses_key() {
+async fn oauth_generation_uses_internal_stream_and_disables_classification() {
     use crate::{
         config::Config,
         provider::{Operation, Provider},
@@ -550,14 +550,13 @@ async fn oauth_generation_uses_internal_stream_and_classification_uses_key() {
     let app=Router::new().route("/v1/responses",post(|headers:HeaderMap,Json(body):Json<Value>|async move {
         assert_eq!(headers["authorization"],"Bearer old-access");assert_eq!(body["stream"],true);assert_eq!(body["store"],false);assert!(body.get("background").is_none());
         ([("content-type","text/event-stream")],"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"future\":true}}\n\n")
-    })).route("/v1/decisions",post(|headers:HeaderMap|async move {assert_eq!(headers["authorization"],"Bearer platform-key");Json(json!({"answers":[]}))}));
+    }));
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     let config = Config::from_lookup(|k| match k {
         "OPENAI_BASE_URL" => Some(url.clone()),
-        "OPENAI_API_KEY" => Some("platform-key".into()),
-        "LLM_MCP_GENERATE_AUTH" => Some("oauth".into()),
+        "LLM_MCP_AUTH" => Some("oauth".into()),
         "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
         _ => None,
     })
@@ -574,12 +573,24 @@ async fn oauth_generation_uses_internal_stream_and_classification_uses_key() {
             .unwrap()["future"],
         true
     );
-    assert!(
+    assert_eq!(
         provider
             .call(Operation::Classify, json!({}), CancellationToken::new())
             .await
-            .is_ok()
+            .unwrap_err()
+            .code,
+        "tool_disabled"
     );
+    let mcp = crate::mcp::McpServer::new(provider.clone());
+    let disabled = mcp
+        .invoke("classify", json!({}), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        disabled.structured_content.unwrap()["error"]["code"],
+        "tool_disabled"
+    );
+    assert!(rmcp::ServerHandler::get_tool(&mcp, "classify").is_none());
     assert_eq!(
         provider
             .call(
@@ -625,7 +636,7 @@ async fn oauth_stream_failures_preserve_provider_context() {
     });
     let config = Config::from_lookup(|key| match key {
         "OPENAI_BASE_URL" => Some(url.clone()),
-        "LLM_MCP_GENERATE_AUTH" => Some("oauth".into()),
+        "LLM_MCP_AUTH" => Some("oauth".into()),
         "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
         "LLM_MCP_MAX_RESPONSE_BYTES" => Some("512".into()),
         _ => None,
@@ -708,7 +719,7 @@ async fn oauth_accepts_untyped_event_streams_without_weakening_validation() {
     });
     let config = Config::from_lookup(|key| match key {
         "OPENAI_BASE_URL" => Some(url.clone()),
-        "LLM_MCP_GENERATE_AUTH" => Some("oauth".into()),
+        "LLM_MCP_AUTH" => Some("oauth".into()),
         "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
         "LLM_MCP_MAX_RESPONSE_BYTES" => Some("512".into()),
         _ => None,

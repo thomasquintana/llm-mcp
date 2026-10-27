@@ -43,7 +43,7 @@ def rpc(url, body, session=None):
         ), session
 
 
-def exercise(container):
+def exercise(container, oauth=False):
     port = docker("port", container, "8080/tcp").rsplit(":", 1)[1]
     base = f"http://127.0.0.1:{port}"
     for attempt in range(100):
@@ -70,7 +70,8 @@ def exercise(container):
     )
     assert response["result"]["serverInfo"]["name"] == "llm-mcp"
     rpc(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session)
-    for index, tool in enumerate(("generate", "classify"), 2):
+    tools = ("generate",) if oauth else ("generate", "classify")
+    for index, tool in enumerate(tools, 2):
         response, _ = rpc(
             url,
             {
@@ -102,7 +103,12 @@ def exercise(container):
             assert value["answers"][0]["probability"] == 0.95
 
 
-def start(image, port, extra=()):
+def start(image, port, extra=(), oauth=False):
+    auth = (
+        ("-e", "LLM_MCP_AUTH=oauth")
+        if oauth
+        else ("-e", "OPENAI_API_KEY=integration-test")
+    )
     return docker(
         "run",
         "-d",
@@ -112,8 +118,7 @@ def start(image, port, extra=()):
         "--add-host=host.docker.internal:host-gateway",
         "-p",
         "127.0.0.1::8080",
-        "-e",
-        "OPENAI_API_KEY=integration-test",
+        *auth,
         "-e",
         f"OPENAI_BASE_URL=http://host.docker.internal:{port}/v1/",
         *extra,
@@ -258,9 +263,10 @@ def main():
         container = start(
             args.image,
             mock.server_port,
-            ("--mount", mount, "-e", "LLM_MCP_GENERATE_AUTH=oauth"),
+            ("--mount", mount),
+            oauth=True,
         )
-        exercise(container)
+        exercise(container, oauth=True)
         docker("stop", "--time=10", container)
         assert docker("inspect", "--format={{.State.ExitCode}}", container) == "0"
         print(

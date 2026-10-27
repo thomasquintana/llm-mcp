@@ -79,11 +79,12 @@ fn main() -> std::process::ExitCode {
 
 async fn run(cli: Cli) -> Result<()> {
     let command = cli.command.unwrap_or(Command::Serve);
+    let config = Config::from_env()?;
     if let Command::Catalog { htlk, transport } = &command {
         let catalog = if *htlk {
-            llm_mcp::mcp::htlk_catalog(transport)
+            llm_mcp::mcp::htlk_catalog(transport, config.auth)
         } else {
-            llm_mcp::mcp::catalog()
+            llm_mcp::mcp::catalog(config.auth)
         };
         println!(
             "{}",
@@ -91,7 +92,6 @@ async fn run(cli: Cli) -> Result<()> {
         );
         return Ok(());
     }
-    let config = Config::from_env()?;
     match command {
         Command::Serve => llm_mcp::runtime::serve(config).await,
         Command::Login => auth::login(&config.credentials_path).await,

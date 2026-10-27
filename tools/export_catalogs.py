@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -13,7 +14,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    for transport in ("stdio", "streamable_http"):
+    for transport, auth in (
+        (transport, auth)
+        for transport in ("stdio", "streamable_http")
+        for auth in ("api_key", "oauth")
+    ):
         output = subprocess.check_output(
             [
                 "cargo",
@@ -28,9 +33,11 @@ def main():
             ],
             cwd=ROOT,
             text=True,
+            env={**os.environ, "LLM_MCP_AUTH": auth},
         )
         json.loads(output)
-        path = ROOT / "examples" / "htlk" / f"{transport}.catalogs.json"
+        suffix = ".oauth" if auth == "oauth" else ""
+        path = ROOT / "examples" / "htlk" / f"{transport}{suffix}.catalogs.json"
         if args.check:
             if path.read_text() != output:
                 raise SystemExit(

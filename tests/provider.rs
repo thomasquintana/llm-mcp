@@ -249,7 +249,7 @@ async fn rejects_nonobject_and_incomplete_provider_results() {
 fn validates_configuration_without_environment_mutation() {
     for (key, value) in [
         ("LLM_MCP_MAX_CONCURRENCY", "0"),
-        ("LLM_MCP_GENERATE_AUTH", "automatic"),
+        ("LLM_MCP_AUTH", "automatic"),
         ("OPENAI_BASE_URL", "https://key:secret@example.com/v1"),
         ("LLM_MCP_TRANSPORT", "sse"),
     ] {
@@ -258,6 +258,32 @@ fn validates_configuration_without_environment_mutation() {
     let config =
         Config::from_lookup(|k| (k == "OPENAI_API_KEY").then(|| "super-secret".into())).unwrap();
     assert!(!format!("{config:?}").contains("super-secret"));
+}
+
+#[test]
+fn authentication_modes_are_exclusive_and_api_key_mode_ignores_oauth_state() {
+    let config = Config::from_lookup(|_| None).unwrap();
+    assert_eq!(Provider::new(config).err().unwrap().code, "configuration");
+    let config = Config::from_lookup(|key| match key {
+        "OPENAI_API_KEY" => Some("test".into()),
+        "LLM_MCP_AUTH" => Some("oauth".into()),
+        _ => None,
+    })
+    .unwrap();
+    assert_eq!(Provider::new(config).err().unwrap().code, "configuration");
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("unused").join("auth.json");
+    let config = Config::from_lookup(|key| match key {
+        "OPENAI_API_KEY" => Some("test".into()),
+        "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
+        _ => None,
+    })
+    .unwrap();
+    let _provider = Provider::new(config).unwrap();
+    assert!(
+        !path.parent().unwrap().exists(),
+        "inactive OAuth state must not be opened"
+    );
 }
 
 #[tokio::test]

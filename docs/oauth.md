@@ -1,8 +1,11 @@
 # OpenAI authentication
 
-Generation explicitly selects `LLM_MCP_GENERATE_AUTH=api_key` (default) or `oauth`.
-Classification always uses `OPENAI_API_KEY`. Authentication never automatically
-falls back to an API key or changes billing mode.
+Select server-wide `LLM_MCP_AUTH=api_key` (default) or `oauth`. API-key mode requires
+`OPENAI_API_KEY` and never opens stored OAuth credentials. OAuth mode enables only
+`generate` and rejects a simultaneously supplied `OPENAI_API_KEY`. Classification,
+embedding and transcription are disabled in OAuth mode. Authentication never
+automatically falls back or changes billing mode. Inactive OAuth files can remain
+on disk while API-key mode is selected.
 
 ## Continue with ChatGPT
 

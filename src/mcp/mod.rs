@@ -2,6 +2,7 @@
 
 use crate::{
     VERSION,
+    config::AuthMode,
     provider::{Operation, Provider},
 };
 use rmcp::{
@@ -80,11 +81,15 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tools()))
+        Ok(ListToolsResult::with_all_items(tools(
+            self.provider.config.auth,
+        )))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        tools().into_iter().find(|t| t.name == name)
+        tools(self.provider.config.auth)
+            .into_iter()
+            .find(|t| t.name == name)
     }
 
     async fn call_tool(
@@ -110,7 +115,7 @@ pub fn server_info() -> ServerConfig {
 }
 
 /// Deterministic, forward-compatible descriptors. Options are provider request fields.
-pub fn tools() -> Vec<Tool> {
+pub fn tools(auth: AuthMode) -> Vec<Tool> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -130,7 +135,7 @@ pub fn tools() -> Vec<Tool> {
     [
         ("generate", "Call OpenAI Responses with caller-supplied request options. Return the complete response; execute returned function calls in the caller."),
         ("classify", "Call OpenAI Decisions with shared input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions."),
-    ].into_iter().map(|(name, description)| {
+    ].into_iter().filter(|(name, _)| auth == AuthMode::ApiKey || *name == "generate").map(|(name, description)| {
         let mut input = schema.as_object().expect("static object").clone();
         if name == "classify" {
             input["properties"].as_object_mut().expect("static properties").insert("questions".into(), json!({"type":"array", "minItems":1, "items":{"type":"object"}, "description":"Named predicate, choice and score questions."}));
@@ -141,18 +146,18 @@ pub fn tools() -> Vec<Tool> {
 }
 
 /// Export exact descriptors and identity without requiring provider credentials.
-pub fn catalog() -> Value {
-    json!({"protocolVersion":crate::MCP_PROTOCOL_VERSION, "serverInfo":server_info().server_info, "tools":tools()})
+pub fn catalog(auth: AuthMode) -> Value {
+    json!({"protocolVersion":crate::MCP_PROTOCOL_VERSION, "serverInfo":server_info().server_info, "tools":tools(auth)})
 }
 
 /// Export HTLK's catalog input format for the selected deployment transport.
-pub fn htlk_catalog(transport: &str) -> Value {
+pub fn htlk_catalog(transport: &str, auth: AuthMode) -> Value {
     json!({
         "tools": {
             "catalog_version":"0.1", "mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,
             "servers":{"llm":{"deployment_id":"llm-mcp", "transport":transport, "implementation_name":"llm-mcp", "implementation_version":VERSION}},
             "schema_documents":{},
-            "tools": tools().into_iter().map(|descriptor| json!({"server":"llm", "descriptor":descriptor})).collect::<Vec<_>>()
+            "tools": tools(auth).into_iter().map(|descriptor| json!({"server":"llm", "descriptor":descriptor})).collect::<Vec<_>>()
         },
         "resources":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"resources":[],"templates":[]},
         "prompts":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"prompts":[]}

@@ -1,6 +1,9 @@
 //! Independent JSON-RPC wire tests, without RMCP's client implementation.
 
-use llm_mcp::{config::Config, mcp, runtime};
+use llm_mcp::{
+    config::{AuthMode, Config},
+    mcp, runtime,
+};
 use serde_json::{Value, json};
 use std::{process::Stdio, time::Duration};
 use tokio::{
@@ -91,7 +94,7 @@ async fn stdio_initializes_lists_calls_without_stdout_noise() {
         if response["id"] == 2 {
             assert_eq!(
                 response["result"]["tools"],
-                serde_json::to_value(mcp::tools()).unwrap()
+                serde_json::to_value(mcp::tools(AuthMode::ApiKey)).unwrap()
             );
             found += 1;
         }
@@ -373,7 +376,7 @@ async fn http_session_health_calls_and_shutdown() {
     .await;
     assert_eq!(
         response["result"]["tools"],
-        serde_json::to_value(mcp::tools()).unwrap()
+        serde_json::to_value(mcp::tools(AuthMode::ApiKey)).unwrap()
     );
     let response=decode_http(post(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"classify","arguments":{"stream":true}}})).send().await.unwrap()).await;
     assert_eq!(response["result"]["isError"], true);

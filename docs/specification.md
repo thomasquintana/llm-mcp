@@ -14,7 +14,8 @@ The HTLK integration requires MCP 2025-11-25 and matching catalog descriptors.
 Reject `stream: true` and `background: true`. Each call returns a completed result.
 OAuth generation internally uses OpenAI-required SSE and store:false, and observes
 OAuth-specific parameter limitations. Explicit auth chooses ChatGPT OAuth or an
-API key for generation; classification uses an API key. No automatic fallback.
+API key for the entire server. OAuth enables only generation; all other tools are
+disabled. OAuth and a configured API key conflict. No automatic fallback.
 
 Application settings come only from environment variables. OAuth registration,
 host identity and rotating tokens persist separately in protected files. Login,

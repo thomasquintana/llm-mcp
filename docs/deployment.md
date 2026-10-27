@@ -56,7 +56,7 @@ PVC permits UID/GID 65532 to write. Both pods use `fsGroupChangePolicy:
 OnRootMismatch`; an owner-run init container restores file mode 0600 after mounting
 because some storage drivers add group permissions on remount. Credential import is explicit; it is not rerun
 on every pod restart. Re-import with the server stopped when reauthorization is
-needed. The platform API key still supplies classification.
+needed. OAuth enables only `generate`; do not supply a platform API key to this deployment.
 
 For Docker OAuth, use the named volume in `deploy/compose/oauth.yaml`, import into
 it with the server stopped, then start Compose. Read-only root filesystems work

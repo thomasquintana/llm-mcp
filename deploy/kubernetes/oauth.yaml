@@ -43,12 +43,9 @@ spec:
           image: ghcr.io/thomasquintana/llm-mcp:0.1.0
           ports: [{name: http, containerPort: 8080}]
           env:
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef: {name: llm-mcp-openai, key: api-key}
             - {name: LLM_MCP_TRANSPORT, value: http}
             - {name: LLM_MCP_BIND, value: "0.0.0.0:8080"}
-            - {name: LLM_MCP_GENERATE_AUTH, value: oauth}
+            - {name: LLM_MCP_AUTH, value: oauth}
             - {name: LLM_MCP_OAUTH_CREDENTIALS_PATH, value: /state/auth.json}
             - {name: LLM_MCP_ALLOWED_HOSTS, value: "llm-mcp-oauth,llm-mcp-oauth.default,llm-mcp-oauth.default.svc,llm-mcp-oauth.default.svc.cluster.local,localhost,127.0.0.1"}
           volumeMounts: [{name: oauth-state, mountPath: /state}]

@@ -1,0 +1,70 @@
+{
+  "prompts": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "prompts": [],
+    "schema_documents": {},
+    "servers": {}
+  },
+  "resources": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "resources": [],
+    "schema_documents": {},
+    "servers": {},
+    "templates": []
+  },
+  "tools": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "schema_documents": {},
+    "servers": {
+      "llm": {
+        "deployment_id": "llm-mcp",
+        "implementation_name": "llm-mcp",
+        "implementation_version": "0.1.0",
+        "transport": "streamable_http"
+      }
+    },
+    "tools": [
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Call OpenAI Responses with caller-supplied request options. Return the complete response; execute returned function calls in the caller.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "input": {
+                "description": "Full provider input, including conversation and tool history."
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "name": "generate",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
+      }
+    ]
+  }
+}

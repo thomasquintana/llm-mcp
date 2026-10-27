@@ -72,11 +72,12 @@ deadlines, concurrency and size limits, and support MCP cancellation.
 ```sh
 llm-mcp login
 llm-mcp auth status
-LLM_MCP_GENERATE_AUTH=oauth llm-mcp serve
+LLM_MCP_AUTH=oauth llm-mcp serve
 ```
 
-OAuth is an explicit alternative for generation. Classification uses a Platform API
-key. OAuth generation consumes OpenAI's required stream internally and returns the
+Authentication is server-wide and mutually exclusive. API-key mode enables all
+tools; OAuth mode enables only generation and rejects `OPENAI_API_KEY`. OAuth
+generation consumes OpenAI's required stream internally and returns the
 completed response. OAuth has different supported parameters from Platform API-key
 access; see [login, refresh and remote deployment](docs/oauth.md).
 

@@ -10,10 +10,10 @@ request fields; model selection and reasoning effort belong to each call.
 | `LLM_MCP_BIND` | `127.0.0.1:8080` | HTTP IP and port; container default is `0.0.0.0:8080` |
 | `LLM_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1` | Comma-separated HTTP Host allowlist; configure actual service names |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1/` | Provider connection base URL; missing trailing slash is normalized |
-| `OPENAI_API_KEY` | unset | Platform key for classification and API-key generation |
+| `OPENAI_API_KEY` | unset | Required in API-key mode; conflicts with OAuth mode |
 | `OPENAI_ORGANIZATION` | unset | Organization header on API-key requests |
 | `OPENAI_PROJECT` | unset | Project header on API-key requests |
-| `LLM_MCP_GENERATE_AUTH` | `api_key` | Explicitly `api_key` or `oauth` |
+| `LLM_MCP_AUTH` | `api_key` | Server-wide `api_key` or `oauth`; OAuth enables only generation |
 | `LLM_MCP_OAUTH_CREDENTIALS_PATH` | `$HOME/.config/llm-mcp/auth.json` | Writable OAuth state; container default `/state/auth.json` |
 | `LLM_MCP_TIMEOUT_MS` | `120000` | Total call deadline including waiting for concurrency capacity |
 | `LLM_MCP_MAX_CONCURRENCY` | `16` | In-flight provider calls per instance |

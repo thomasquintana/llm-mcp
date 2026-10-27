@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use url::Url;
 
-/// Explicit authentication method for generation.
+/// Mutually exclusive server-wide authentication method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMode {
     /// Platform API key.
@@ -24,14 +24,14 @@ pub struct Config {
     pub allowed_hosts: Vec<String>,
     /// Base URL including `/v1/`.
     pub base_url: Url,
-    /// Platform key, used for classification and API-key generation.
+    /// Platform key, used exclusively in API-key mode.
     pub api_key: Option<String>,
     /// Optional OpenAI organization.
     pub organization: Option<String>,
     /// Optional OpenAI project.
     pub project: Option<String>,
-    /// Generation authentication selection.
-    pub generate_auth: AuthMode,
+    /// Server-wide authentication selection.
+    pub auth: AuthMode,
     /// OAuth credential file, on writable persistent storage.
     pub credentials_path: PathBuf,
     /// Total tool-call deadline, including queue time.
@@ -49,7 +49,7 @@ impl std::fmt::Debug for Config {
         f.debug_struct("Config")
             .field("transport", &self.transport)
             .field("bind", &self.bind)
-            .field("generate_auth", &self.generate_auth)
+            .field("auth", &self.auth)
             .finish_non_exhaustive()
     }
 }
@@ -99,13 +99,13 @@ impl Config {
         if !base_url.path().ends_with('/') {
             base_url.set_path(&format!("{}/", base_url.path()));
         }
-        let generate_auth = match get("LLM_MCP_GENERATE_AUTH").as_deref().unwrap_or("api_key") {
+        let auth = match get("LLM_MCP_AUTH").as_deref().unwrap_or("api_key") {
             "api_key" => AuthMode::ApiKey,
             "oauth" => AuthMode::OAuth,
             _ => {
                 return Err(Error::new(
                     "configuration",
-                    "LLM_MCP_GENERATE_AUTH must be api_key or oauth",
+                    "LLM_MCP_AUTH must be api_key or oauth",
                 ));
             }
         };
@@ -123,7 +123,7 @@ impl Config {
                 .map(str::to_owned)
                 .collect(),
             base_url,
-            generate_auth,
+            auth,
             api_key: get("OPENAI_API_KEY").filter(|s| !s.is_empty()),
             organization: get("OPENAI_ORGANIZATION"),
             project: get("OPENAI_PROJECT"),

@@ -86,7 +86,7 @@ def main():
     settings = {
         "OPENAI_API_KEY": "integration-test",
         "OPENAI_BASE_URL": f"http://127.0.0.1:{mock.server_port}/v1/",
-        "LLM_MCP_GENERATE_AUTH": "api_key",
+        "LLM_MCP_AUTH": "api_key",
     }
     try:
         for transport in ("stdio", "streamable_http"):

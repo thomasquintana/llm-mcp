@@ -42,10 +42,25 @@ pub struct Provider {
 impl Provider {
     /// Construct a provider. No network request is made.
     pub fn new(config: Config) -> Result<Self> {
+        match config.auth {
+            AuthMode::ApiKey if config.api_key.is_none() => {
+                return Err(Error::new(
+                    "configuration",
+                    "API-key mode requires OPENAI_API_KEY",
+                ));
+            }
+            AuthMode::OAuth if config.api_key.is_some() => {
+                return Err(Error::new(
+                    "configuration",
+                    "OAuth mode conflicts with OPENAI_API_KEY",
+                ));
+            }
+            _ => {}
+        }
         let client = client_builder().build().map_err(Error::transport)?;
         let slots = Arc::new(Semaphore::new(config.concurrency));
         let cpu_slots = Arc::new(Semaphore::new(config.concurrency));
-        let oauth = if config.generate_auth == AuthMode::OAuth {
+        let oauth = if config.auth == AuthMode::OAuth {
             Some(Arc::new(OAuthSession::open(&config.credentials_path)?))
         } else {
             None
@@ -85,6 +100,12 @@ impl Provider {
         deadline: tokio::time::Instant,
     ) -> Result<Value> {
         let _activity = self.activity();
+        if self.config.auth == AuthMode::OAuth && operation != Operation::Generate {
+            return Err(Error::new(
+                "tool_disabled",
+                "this tool is disabled in OAuth mode",
+            ));
+        }
         validate(&arguments)?;
         if self.stopping.load(Ordering::Acquire) {
             return Err(Error::new("shutdown", "server is shutting down"));
@@ -157,8 +178,7 @@ impl Provider {
     }
 
     async fn execute(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
-        let oauth =
-            operation == Operation::Generate && self.config.generate_auth == AuthMode::OAuth;
+        let oauth = self.config.auth == AuthMode::OAuth;
         if oauth {
             prepare_oauth(&mut arguments)?;
         }

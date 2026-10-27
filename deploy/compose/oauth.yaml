@@ -4,8 +4,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY for classify}
-      LLM_MCP_GENERATE_AUTH: oauth
+      LLM_MCP_AUTH: oauth
       LLM_MCP_ALLOWED_HOSTS: localhost,127.0.0.1,llm-mcp
     volumes:
       - oauth-state:/state

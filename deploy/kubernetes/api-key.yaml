@@ -26,7 +26,7 @@ spec:
                 secretKeyRef: {name: llm-mcp-openai, key: api-key}
             - {name: LLM_MCP_TRANSPORT, value: http}
             - {name: LLM_MCP_BIND, value: "0.0.0.0:8080"}
-            - {name: LLM_MCP_GENERATE_AUTH, value: api_key}
+            - {name: LLM_MCP_AUTH, value: api_key}
             - {name: LLM_MCP_ALLOWED_HOSTS, value: "llm-mcp,llm-mcp.default,llm-mcp.default.svc,llm-mcp.default.svc.cluster.local,localhost,127.0.0.1"}
           startupProbe:
             httpGet: {path: /health/live, port: http}
