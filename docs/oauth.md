@@ -63,6 +63,9 @@ OAuth requests must supply full history as an input array. The server internally
 sets `store:false` and `stream:true`, consumes SSE through `response.completed`, and
 returns the completed response object. Failed/incomplete/interrupted streams are
 errors. The stream byte limit counts all events, not just the final response.
+Live OpenAI responses may omit `Content-Type`; the collector accepts that case
+only when the body supplies valid SSE data and a completed terminal response.
+An explicit incompatible media type remains an error.
 
 The server explicitly rejects currently documented unsupported OAuth fields:
 `conversation`, `previous_response_id`, `max_output_tokens`, `max_tool_calls`,

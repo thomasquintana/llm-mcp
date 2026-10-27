@@ -653,3 +653,102 @@ async fn oauth_stream_failures_preserve_provider_context() {
     provider.shutdown().await;
     server.abort();
 }
+
+#[tokio::test]
+async fn oauth_accepts_untyped_event_streams_without_weakening_validation() {
+    use crate::{config::Config, mcp::McpServer, provider::Provider};
+    use axum::{body::Body, http::Response};
+    use tokio_util::sync::CancellationToken;
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let store = Store::open(&path).unwrap();
+    let mut record = credentials(&store.host_id);
+    record.expires_at = now() + 3600;
+    store.save(&record).unwrap();
+    drop(store);
+
+    let expected =
+        json!({"id":"resp_live_header", "status":"completed", "output":[], "future_field":true});
+    let completed = expected.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/v1/responses",
+        post(move |Json(body): Json<Value>| {
+            let completed = completed.clone();
+            async move {
+                let case = body["input"][0]["content"].as_str().unwrap();
+                let content_type = match case {
+                    "typed" => Some("text/event-stream"),
+                    "mixed-case" => Some("Text/Event-Stream; charset=utf-8"),
+                    "explicit-json" => Some("application/json"),
+                    "misleading" => Some("text/event-stream-json"),
+                    _ => None,
+                };
+                let bytes = match case {
+                    "json" => completed.to_string(),
+                    "truncated" => "data: {\"type\":\"response.created\"}\n\n".into(),
+                    "oversized" => format!(": {}\n\n", "x".repeat(1024)),
+                    _ => format!(
+                        "data: {}\n\n",
+                        json!({"type":"response.completed", "response":completed})
+                    ),
+                };
+                let mut response = Response::builder().header("x-request-id", "req-live-header");
+                if let Some(value) = content_type {
+                    response = response.header("content-type", value);
+                }
+                response.body(Body::from(bytes)).unwrap()
+            }
+        }),
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let config = Config::from_lookup(|key| match key {
+        "OPENAI_BASE_URL" => Some(url.clone()),
+        "LLM_MCP_GENERATE_AUTH" => Some("oauth".into()),
+        "LLM_MCP_OAUTH_CREDENTIALS_PATH" => Some(path.to_str().unwrap().into()),
+        "LLM_MCP_MAX_RESPONSE_BYTES" => Some("512".into()),
+        _ => None,
+    })
+    .unwrap();
+    let provider = Provider::new(config).unwrap();
+    let mcp = McpServer::new(provider.clone());
+    for (case, error) in [
+        ("missing", None),
+        ("typed", None),
+        ("mixed-case", None),
+        ("explicit-json", Some("provider_protocol")),
+        ("misleading", Some("provider_protocol")),
+        ("json", Some("provider_incomplete")),
+        ("truncated", Some("provider_incomplete")),
+        ("oversized", Some("response_too_large")),
+    ] {
+        let result = mcp
+            .invoke(
+                "generate",
+                json!({"model":"mock", "input":[{"role":"user", "content":case}]}),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        if let Some(code) = error {
+            assert_eq!(result.is_error, Some(true), "{case}");
+            let value = result.structured_content.unwrap();
+            assert_eq!(value["error"]["code"], code, "{case}");
+            assert_eq!(value["error"]["request_id"], "req-live-header", "{case}");
+        } else {
+            assert_eq!(
+                result.is_error,
+                Some(false),
+                "{case}: {:?}",
+                result.structured_content
+            );
+            assert_eq!(result.structured_content, Some(expected.clone()), "{case}");
+        }
+    }
+    provider.shutdown().await;
+    task.abort();
+}

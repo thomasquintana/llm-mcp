@@ -74,11 +74,15 @@ pub async fn collect(
     limit: usize,
     provider: &super::Provider,
 ) -> Result<Value> {
-    if !response
-        .headers()
-        .get("content-type")
-        .and_then(|h| h.to_str().ok())
-        .is_some_and(|s| s.starts_with("text/event-stream"))
+    // Live OpenAI OAuth responses can omit Content-Type. In that case validate
+    // the bounded SSE body and its completed terminal event rather than reject
+    // a valid response. An explicit incompatible media type remains an error.
+    if let Some(content_type) = response.headers().get("content-type")
+        && !content_type.to_str().is_ok_and(|value| {
+            value.split(';').next().is_some_and(|media_type| {
+                media_type.trim().eq_ignore_ascii_case("text/event-stream")
+            })
+        })
     {
         return Err(Error::new(
             "provider_protocol",

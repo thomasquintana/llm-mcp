@@ -17,11 +17,11 @@ in docs/verification.md. Do not publish registries or push git.
    HTTP 200, but the SSE collector rejected the response Content-Type. Use a
    temporary diagnostic example to inspect only response type/shape, excluding
    authorization headers and tokens. Remove that example when done.
-2. [IN PROGRESS] Implement the smallest correct response-handling change based on the
+2. [COMPLETE] Implement the smallest correct response-handling change based on the
    observed wire response. Add a regression demonstrating the actual failure and
    preserve bounds, completed-result semantics and error handling. Review plan and
    run format/Clippy/tests/rustdoc before committing any code task.
-3. [PENDING] Repeat the minimal live MCP generation call, update durable evidence,
+3. [IN PROGRESS] Repeat the minimal live MCP generation call, update durable evidence,
    complete regression/static/package gates, inspect git status/diff/log, commit
    intended changes and remove this temporary plan in a final gated cleanup commit.
 
@@ -36,3 +36,7 @@ in docs/verification.md. Do not publish registries or push git.
 - Diagnosis: actual HTTP 200 response has no Content-Type header, and its bounded
   body is a genuine SSE stream with response.created/in_progress/output delta
   events. Temporary diagnostic example removed; no credentials were printed.
+- Regression reproduced the missing-header failure before the fix. Collector now
+  tolerates an absent Content-Type, matches present SSE media types correctly,
+  and still rejects incompatible types, truncated/non-SSE bodies and oversized
+  streams. All 31 Rust regressions, formatting, Clippy and rustdoc pass.
