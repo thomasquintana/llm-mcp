@@ -7,6 +7,12 @@ fields. Credentials, base URL and transport settings are environment configurati
 not tool arguments. Conversations are supplied by callers; the server stores no
 conversation history and executes no returned function calls.
 
+Generation and classification accept native text/image content parts. Images must
+be nonempty base64 data URLs with supported image MIME types; remote URLs and image
+file references are rejected before dispatch. The same rule covers supported tool
+outputs and classification question instructions. Unrelated JSON is not scanned as
+media. Encoded request and aggregate decoded-media bytes are bounded.
+
 MCP arguments and structured results are JSON objects. Both tools publish stable
 input/output schemas. Successful structuredContent is the full provider response.
 The HTLK integration requires MCP 2025-11-25 and matching catalog descriptors.

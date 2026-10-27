@@ -26,7 +26,7 @@ The HTTP endpoint is `/mcp`, with `/health/live` and `/health/ready` probes. Use
 ## Tools
 
 Tool arguments are provider request objects, with caller-selected models and
-options. Full conversation context, function calls/outputs, images where supported,
+options. Full conversation context, function calls/outputs, base64 images,
 and newly introduced provider fields are preserved. Example `generate` arguments:
 
 ```json
@@ -41,6 +41,21 @@ and newly introduced provider fields are preserved. Example `generate` arguments
 `generate` supports text, JSON-Schema-constrained output and returned function calls.
 The caller executes functions and supplies their results in a follow-up call.
 Reasoning effort is a generation option, so there is no separate `reason` tool.
+
+`generate` and `classify` accept mixed content such as:
+
+```json
+[
+  {"role":"user","content":[
+    {"type":"input_text","text":"Describe the visible equipment."},
+    {"type":"input_image","image_url":"data:image/png;base64,<encoded-image>"}
+  ]}
+]
+```
+
+Images must be base64 data URLs (PNG, JPEG, WebP or GIF), including in tool-output
+evidence and classification instructions. Remote image URLs and image file IDs are
+rejected. OpenAI validates the decoded image format and model compatibility.
 
 Example `classify` arguments:
 

@@ -120,7 +120,7 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
         "type": "object",
         "properties": {
             "model": {"type":"string", "description":"Provider model identifier."},
-            "input": {"description":"Full provider input, including conversation and tool history."},
+            "input": {"description":"Full provider input including conversation/tool history and text or input_image parts. Images must use base64 data URLs, never remote URLs or file IDs."},
             "stream": {"type":"boolean", "const":false},
             "background": {"type":"boolean", "const":false}
         },
@@ -133,8 +133,8 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
             .clone(),
     );
     [
-        ("generate", "Call OpenAI Responses with caller-supplied request options. Return the complete response; execute returned function calls in the caller."),
-        ("classify", "Call OpenAI Decisions with shared input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions."),
+        ("generate", "Call OpenAI Responses with text and base64 image input and caller-supplied options. Return the complete response; execute returned function calls in the caller."),
+        ("classify", "Call OpenAI Decisions with shared text/base64 image input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions."),
     ].into_iter().filter(|(name, _)| auth == AuthMode::ApiKey || *name == "generate").map(|(name, description)| {
         let mut input = schema.as_object().expect("static object").clone();
         if name == "classify" {

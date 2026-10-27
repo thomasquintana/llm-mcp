@@ -133,6 +133,67 @@ async fn preserves_batched_classification_and_refusals() {
 }
 
 #[tokio::test]
+async fn preserves_images_in_messages_tool_evidence_and_classification_questions() {
+    let image = json!({"type":"input_image", "image_url":"data:image/png;base64,eA==", "detail":"high", "future_image_option":true});
+    let text = json!({"type":"input_text", "text":"Context"});
+    for (tool, response) in [
+        ("generate", json!({"status":"completed", "output":[]})),
+        ("classify", json!({"answers":[]})),
+    ] {
+        let f = fixture(response.clone(), StatusCode::OK, Duration::ZERO, &[]).await;
+        let mut request = json!({"model":"vision-model", "input":[
+            {"role":"user", "content":[text.clone(), image.clone(), image.clone()]},
+            {"type":"function_call", "call_id":"f", "name":"inspect", "arguments":"{}"},
+            {"type":"function_call_output", "call_id":"f", "output":[text.clone(),image.clone()]},
+            {"type":"custom_tool_call", "call_id":"c", "name":"inspect_custom", "input":""},
+            {"type":"custom_tool_call_output", "call_id":"c", "output":[image.clone()]}
+        ], "metadata":{"type":"input_image", "image_url":"https://uninterpreted.example"}});
+        if tool == "classify" {
+            request["questions"] = json!([{ "type":"predicate", "name":"match", "instructions":[text.clone(),image.clone()] }]);
+        }
+        let server = McpServer::new(f.provider.clone());
+        let result = server
+            .invoke(tool, request.clone(), CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.structured_content, Some(response));
+        assert_eq!(f.captured.lock().await.recv().await.unwrap().1, request);
+    }
+}
+
+#[tokio::test]
+async fn rejects_non_base64_images_in_all_supported_content_locations() {
+    let f = fixture(json!({}), StatusCode::OK, Duration::ZERO, &[]).await;
+    for image in [
+        json!({"type":"input_image", "image_url":"https://example.com/private.png"}),
+        json!({"type":"input_image", "file_id":"file-private"}),
+        json!({"type":"input_image", "image_url":"data:image/png;base64,eA==", "file_id":"file-private"}),
+        json!({"type":"input_image", "image_url":"data:image/svg+xml;base64,eA=="}),
+        json!({"type":"input_image", "image_url":"data:image/png;base64,broken-secret"}),
+        json!({"type":"input_image", "image_url":"data:image/png;base64,"}),
+        json!({"type":"input_image", "image_url":"/tmp/private.png"}),
+        json!({"type":"image_url", "image_url":{"url":"https://example.com/private.png"}}),
+    ] {
+        for request in [
+            json!({"input":[{"role":"user", "content":[image.clone()]}]}),
+            json!({"input":[{"type":"function_call_output", "output":[image.clone()]}]}),
+            json!({"input":[{"type":"custom_tool_call_output", "output":[image.clone()]}]}),
+            json!({"questions":[{"instructions":[image.clone()]}]}),
+        ] {
+            let error = f
+                .provider
+                .call(Operation::Classify, request, CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, "invalid_media");
+            assert!(!error.message.contains("private"));
+            assert!(!error.message.contains("secret"));
+        }
+    }
+    assert!(f.captured.lock().await.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn rejects_background_and_streaming_before_network_dispatch() {
     let f = fixture(json!({}), StatusCode::OK, Duration::ZERO, &[]).await;
     for request in [

@@ -549,6 +549,7 @@ async fn oauth_generation_uses_internal_stream_and_disables_classification() {
     let url = format!("http://{}/v1/", listener.local_addr().unwrap());
     let app=Router::new().route("/v1/responses",post(|headers:HeaderMap,Json(body):Json<Value>|async move {
         assert_eq!(headers["authorization"],"Bearer old-access");assert_eq!(body["stream"],true);assert_eq!(body["store"],false);assert!(body.get("background").is_none());
+        assert_eq!(body["input"][0]["content"][1], json!({"type":"input_image","image_url":"data:image/png;base64,eA==","detail":"high"}));
         ([("content-type","text/event-stream")],"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"future\":true}}\n\n")
     }));
     let task = tokio::spawn(async move {
@@ -566,7 +567,7 @@ async fn oauth_generation_uses_internal_stream_and_disables_classification() {
         provider
             .call(
                 Operation::Generate,
-                json!({"input":[],"background":false}),
+                json!({"input":[{"role":"user","content":[{"type":"input_text","text":"Describe"},{"type":"input_image","image_url":"data:image/png;base64,eA==","detail":"high"}]}],"background":false}),
                 CancellationToken::new()
             )
             .await

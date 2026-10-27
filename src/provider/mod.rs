@@ -1,5 +1,6 @@
 //! Bounded OpenAI HTTP requests, preserving provider JSON.
 
+mod media;
 mod sse;
 
 use crate::{
@@ -106,7 +107,6 @@ impl Provider {
                 "this tool is disabled in OAuth mode",
             ));
         }
-        validate(&arguments)?;
         if self.stopping.load(Ordering::Acquire) {
             return Err(Error::new("shutdown", "server is shutting down"));
         }
@@ -178,6 +178,22 @@ impl Provider {
     }
 
     async fn execute(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
+        let limit = self.config.max_request_bytes;
+        arguments = self
+            .cpu(move || {
+                validate(&arguments)?;
+                let bytes = serde_json::to_vec(&arguments)
+                    .map_err(|_| Error::new("invalid_request", "invalid JSON"))?;
+                if bytes.len() > limit {
+                    return Err(Error::new(
+                        "request_too_large",
+                        "tool arguments exceed configured byte limit",
+                    ));
+                }
+                media::validate_images(&arguments, limit)?;
+                Ok(arguments)
+            })
+            .await??;
         let oauth = self.config.auth == AuthMode::OAuth;
         if oauth {
             prepare_oauth(&mut arguments)?;

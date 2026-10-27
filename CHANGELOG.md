@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Validate base64-only image inputs for generation and classification, including question instructions and tool-output evidence; reject URL/file references and malformed media before dispatch.
+
 - Select mutually exclusive server-wide authentication with `LLM_MCP_AUTH`; OAuth exposes only generation, and catalogs reflect the selected mode.
 
 - Accept valid OpenAI OAuth event streams with an omitted Content-Type header while retaining terminal-event and size validation.

@@ -35,7 +35,7 @@
             "openWorldHint": true,
             "readOnlyHint": false
           },
-          "description": "Call OpenAI Responses with caller-supplied request options. Return the complete response; execute returned function calls in the caller.",
+          "description": "Call OpenAI Responses with text and base64 image input and caller-supplied options. Return the complete response; execute returned function calls in the caller.",
           "inputSchema": {
             "additionalProperties": true,
             "properties": {
@@ -44,7 +44,7 @@
                 "type": "boolean"
               },
               "input": {
-                "description": "Full provider input, including conversation and tool history."
+                "description": "Full provider input including conversation/tool history and text or input_image parts. Images must use base64 data URLs, never remote URLs or file IDs."
               },
               "model": {
                 "description": "Provider model identifier.",
@@ -73,7 +73,7 @@
             "openWorldHint": true,
             "readOnlyHint": false
           },
-          "description": "Call OpenAI Decisions with shared input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions.",
+          "description": "Call OpenAI Decisions with shared text/base64 image input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions.",
           "inputSchema": {
             "additionalProperties": true,
             "properties": {
@@ -82,7 +82,7 @@
                 "type": "boolean"
               },
               "input": {
-                "description": "Full provider input, including conversation and tool history."
+                "description": "Full provider input including conversation/tool history and text or input_image parts. Images must use base64 data URLs, never remote URLs or file IDs."
               },
               "model": {
                 "description": "Provider model identifier.",
