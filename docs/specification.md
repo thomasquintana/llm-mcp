@@ -13,6 +13,19 @@ file references are rejected before dispatch. The same rule covers supported too
 outputs and classification question instructions. Unrelated JSON is not scanned as
 media. Encoded request and aggregate decoded-media bytes are bounded.
 
+`embed` accepts standard OpenAI text/token `input` or a mutually exclusive `inputs`
+batch of `{content:[input_text/input_image parts]}`. Image-bearing items require
+`description.model` with optional `description.instructions`. All images within an
+item are described together; original text context plus the detailed description
+becomes one embedding input. Text-only items embed directly. The server prepares
+every item before issuing one ordered `/embeddings` batch; any preparation failure
+fails the entire call and skips embedding. Errors identify `input_index` when known.
+The consistent result envelope is `{response: <full embedding response>,
+prepared_inputs: [...]}`. Prepared items retain index and exact text; image items
+also retain description, description_model and returned description_usage. Standard
+text/token requests return an empty prepared_inputs array. Both stages use API keys
+and share one deadline and concurrency permit.
+
 MCP arguments and structured results are JSON objects. Both tools publish stable
 input/output schemas. Successful structuredContent is the full provider response.
 The HTLK integration requires MCP 2025-11-25 and matching catalog descriptors.

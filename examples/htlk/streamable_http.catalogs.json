@@ -110,6 +110,107 @@
           }
         },
         "server": "llm"
+      },
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Embed text/tokens directly or prepare contextual descriptions of base64 images, then embed original context plus description. One vector per item; a preparation failure fails the whole call. Return full embedding response and indexed preparation metadata. API-key mode only.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "oneOf": [
+              {
+                "not": {
+                  "required": [
+                    "inputs"
+                  ]
+                },
+                "required": [
+                  "input"
+                ]
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                },
+                "required": [
+                  "inputs"
+                ]
+              }
+            ],
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "description": {
+                "additionalProperties": false,
+                "description": "Vision model and optional guidance, required for image-bearing inputs.",
+                "properties": {
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "model"
+                ],
+                "type": "object"
+              },
+              "input": {
+                "description": "Standard OpenAI embedding text, string batch, token array or token batch. Mutually exclusive with inputs."
+              },
+              "inputs": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "Ordered input_text and base64 input_image parts. All images in this item produce one description and one vector.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model"
+            ],
+            "type": "object"
+          },
+          "name": "embed",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
       }
     ]
   }

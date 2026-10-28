@@ -18,6 +18,9 @@ pub struct Error {
     /// Provider correlation identifier, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// Failed input item in a multi-item preparation request, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_index: Option<usize>,
 }
 
 impl Error {
@@ -29,6 +32,7 @@ impl Error {
             retryable: false,
             status: None,
             request_id: None,
+            input_index: None,
         }
     }
 
@@ -75,6 +79,11 @@ impl Error {
         if self.request_id.is_none() {
             self.request_id = request_id;
         }
+        self
+    }
+
+    pub(crate) fn at_input(mut self, index: usize) -> Self {
+        self.input_index = Some(index);
         self
     }
 }

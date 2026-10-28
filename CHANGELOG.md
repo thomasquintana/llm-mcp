@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Add `embed` for OpenAI text/token embeddings and ordered image-description batches, embedding original context plus description with indexed preparation and usage metadata.
+
 - Validate base64-only image inputs for generation and classification, including question instructions and tool-output evidence; reject URL/file references and malformed media before dispatch.
 
 - Select mutually exclusive server-wide authentication with `LLM_MCP_AUTH`; OAuth exposes only generation, and catalogs reflect the selected mode.

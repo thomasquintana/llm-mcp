@@ -592,6 +592,15 @@ async fn oauth_generation_uses_internal_stream_and_disables_classification() {
         "tool_disabled"
     );
     assert!(rmcp::ServerHandler::get_tool(&mcp, "classify").is_none());
+    let disabled = mcp
+        .invoke("embed", json!({}), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        disabled.structured_content.unwrap()["error"]["code"],
+        "tool_disabled"
+    );
+    assert!(rmcp::ServerHandler::get_tool(&mcp, "embed").is_none());
     assert_eq!(
         provider
             .call(

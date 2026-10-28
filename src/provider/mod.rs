@@ -1,5 +1,6 @@
 //! Bounded OpenAI HTTP requests, preserving provider JSON.
 
+mod embed;
 mod media;
 mod sse;
 
@@ -25,6 +26,8 @@ pub enum Operation {
     Generate,
     /// OpenAI Decisions.
     Classify,
+    /// OpenAI text embeddings, optionally prepared from image descriptions.
+    Embed,
 }
 
 /// Reusable connection pool with bounded execution.
@@ -182,32 +185,67 @@ impl Provider {
         arguments = self
             .cpu(move || {
                 validate(&arguments)?;
-                let bytes = serde_json::to_vec(&arguments)
-                    .map_err(|_| Error::new("invalid_request", "invalid JSON"))?;
-                if bytes.len() > limit {
-                    return Err(Error::new(
-                        "request_too_large",
-                        "tool arguments exceed configured byte limit",
-                    ));
+                bounded_json(&arguments, limit, true)?;
+                if operation != Operation::Embed {
+                    media::validate_images(&arguments, limit)?;
                 }
-                media::validate_images(&arguments, limit)?;
                 Ok(arguments)
             })
             .await??;
+        let value = match operation {
+            Operation::Embed => self.embed(arguments).await?,
+            _ => self.json(operation, arguments).await?,
+        };
+        let limit = self.config.max_response_bytes;
+        self.cpu(move || {
+            bounded_json(&value, limit, false)?;
+            Ok(value)
+        })
+        .await?
+    }
+
+    async fn json(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
         let oauth = self.config.auth == AuthMode::OAuth;
-        if oauth {
-            prepare_oauth(&mut arguments)?;
-        }
+        let limit = self.config.max_request_bytes;
         let bytes = self
-            .cpu(move || serde_json::to_vec(&arguments))
+            .cpu(move || {
+                if oauth {
+                    prepare_oauth(&mut arguments)?;
+                }
+                bounded_json(&arguments, limit, true)
+            })
+            .await??;
+        let endpoint = match operation {
+            Operation::Generate => "responses",
+            Operation::Classify => "decisions",
+            Operation::Embed => "embeddings",
+        };
+        let request = self
+            .request(endpoint, oauth)
             .await?
-            .map_err(|_| Error::new("invalid_request", "invalid JSON"))?;
-        if bytes.len() > self.config.max_request_bytes {
-            return Err(Error::new(
-                "request_too_large",
-                "tool arguments exceed configured byte limit",
-            ));
-        }
+            .header(
+                header::ACCEPT,
+                if oauth {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(bytes);
+        let response = self.send(request).await?;
+        let status = response.status();
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_owned);
+        self.decode_response(operation, response, oauth)
+            .await
+            .map_err(|error| error.context(status.as_u16(), request_id))
+    }
+
+    async fn request(&self, endpoint: &str, oauth: bool) -> Result<reqwest::RequestBuilder> {
         let key = if oauth {
             self.oauth
                 .as_ref()
@@ -222,49 +260,27 @@ impl Provider {
                 )
             })?
         };
-        let endpoint = if operation == Operation::Generate {
-            "responses"
-        } else {
-            "decisions"
-        };
         let url = self
             .config
             .base_url
             .join(endpoint)
             .map_err(|_| Error::new("configuration", "invalid provider endpoint"))?;
-        let mut request = self
-            .client
-            .post(url)
-            .bearer_auth(key)
-            .header(
-                header::ACCEPT,
-                if oauth {
-                    "text/event-stream"
-                } else {
-                    "application/json"
-                },
-            )
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(bytes);
+        let mut request = self.client.post(url).bearer_auth(key);
         if !oauth && let Some(value) = &self.config.organization {
             request = request.header("OpenAI-Organization", value);
         }
         if !oauth && let Some(value) = &self.config.project {
             request = request.header("OpenAI-Project", value);
         }
+        Ok(request)
+    }
+
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<Response> {
         let response = request.send().await.map_err(Error::transport)?;
-        let status = response.status();
-        let request_id = response
-            .headers()
-            .get("x-request-id")
-            .and_then(|h| h.to_str().ok())
-            .map(str::to_owned);
-        if !status.is_success() {
+        if !response.status().is_success() {
             return Err(Error::http(&response, false));
         }
-        self.decode_response(operation, response, oauth)
-            .await
-            .map_err(|error| error.context(status.as_u16(), request_id))
+        Ok(response)
     }
 
     async fn decode_response(
@@ -305,6 +321,45 @@ impl Provider {
         }
         Ok(value)
     }
+}
+
+/// Serialize without allocating beyond the configured boundary.
+fn bounded_json(value: &impl serde::Serialize, limit: usize, request: bool) -> Result<Vec<u8>> {
+    struct Writer {
+        bytes: Vec<u8>,
+        limit: usize,
+    }
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+                return Err(std::io::Error::other("byte limit"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = Writer {
+        bytes: Vec::new(),
+        limit,
+    };
+    serde_json::to_writer(&mut writer, value).map_err(|_| {
+        Error::new(
+            if request {
+                "request_too_large"
+            } else {
+                "response_too_large"
+            },
+            if request {
+                "request exceeds configured byte limit"
+            } else {
+                "assembled result exceeds configured byte limit"
+            },
+        )
+    })?;
+    Ok(writer.bytes)
 }
 
 fn client_builder() -> reqwest::ClientBuilder {

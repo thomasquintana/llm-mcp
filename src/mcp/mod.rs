@@ -38,6 +38,7 @@ impl McpServer {
         let operation = match name {
             "generate" => Operation::Generate,
             "classify" => Operation::Classify,
+            "embed" => Operation::Embed,
             _ => return Err(ErrorData::invalid_params("unknown tool", None)),
         };
         let outcome = self
@@ -135,10 +136,19 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
     [
         ("generate", "Call OpenAI Responses with text and base64 image input and caller-supplied options. Return the complete response; execute returned function calls in the caller."),
         ("classify", "Call OpenAI Decisions with shared text/base64 image input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions."),
+        ("embed", "Embed text/tokens directly or prepare contextual descriptions of base64 images, then embed original context plus description. One vector per item; a preparation failure fails the whole call. Return full embedding response and indexed preparation metadata. API-key mode only."),
     ].into_iter().filter(|(name, _)| auth == AuthMode::ApiKey || *name == "generate").map(|(name, description)| {
         let mut input = schema.as_object().expect("static object").clone();
         if name == "classify" {
             input["properties"].as_object_mut().expect("static properties").insert("questions".into(), json!({"type":"array", "minItems":1, "items":{"type":"object"}, "description":"Named predicate, choice and score questions."}));
+        }
+        if name == "embed" {
+            let properties = input["properties"].as_object_mut().expect("static properties");
+            properties.insert("input".into(), json!({"description":"Standard OpenAI embedding text, string batch, token array or token batch. Mutually exclusive with inputs."}));
+            properties.insert("inputs".into(), json!({"type":"array", "minItems":1, "items":{"type":"object", "required":["content"], "properties":{"content":{"type":"array", "minItems":1, "items":{"type":"object"}, "description":"Ordered input_text and base64 input_image parts. All images in this item produce one description and one vector."}}, "additionalProperties":false}}));
+            properties.insert("description".into(), json!({"type":"object", "required":["model"], "properties":{"model":{"type":"string", "minLength":1}, "instructions":{"type":"string"}}, "additionalProperties":false, "description":"Vision model and optional guidance, required for image-bearing inputs."}));
+            input.insert("required".into(), json!(["model"]));
+            input.insert("oneOf".into(), json!([{"required":["input"],"not":{"required":["inputs"]}}, {"required":["inputs"],"not":{"required":["input"]}}]));
         }
         Tool::new(name, description, input).with_raw_output_schema(output.clone())
             .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(false).open_world(true))
