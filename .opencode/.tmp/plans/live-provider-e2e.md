@@ -20,8 +20,8 @@ Coverage per transport: API generation text and known base64 image; Decisions te
 ## Tasks
 
 0. [completed] Save plan and repository baseline; commit before implementation.
-1. [in progress] Add real media fixtures with provenance and a reusable independent binary/MCP harness plus credential gates/configuration/reporting. Verify offline gates, configuration isolation, bounded transport behavior and process cleanup with meaningful regressions; commit.
-2. [pending] Add automatically gated real-OpenAI suites for API and OAuth over both transports with semantic assertions/model overrides. Verify available live suites and absent/invalid credentials, fix actual integration findings; commit.
+1. [completed] Add real media fixtures with provenance and a reusable independent binary/MCP harness plus credential gates/configuration/reporting. Verify offline gates, configuration isolation, bounded transport behavior and process cleanup with meaningful regressions; commit.
+2. [in progress] Add automatically gated real-OpenAI suites for API and OAuth over both transports with semantic assertions/model overrides. Verify available live suites and absent/invalid credentials, fix actual integration findings; commit.
 3. [pending] Update CONTRIBUTING/README/testing/auth docs, changelog and permanent evidence. Run all required checks and record actual live execution vs skips; commit.
 4. [pending] Read completed plan, remove plan, commit cleanup and push all work to origin/main; verify clean/synchronized state.
 
@@ -51,5 +51,6 @@ Coverage per transport: API generation text and known base64 image; Decisions te
 ## Baseline / evidence
 
 - Clean main synchronized with origin/main at 9fa2320. Origin=https://github.com/thomasquintana/llm-mcp.git. No repository AGENTS.md found. CONTRIBUTING.md applies except its old opt-in live-test policy is superseded by the user's automatic credential gating requirement.
-- No source or credential files changed before saving this plan. Credential availability has not yet been checked.
+- No source or credential files changed before saving this plan. Availability check found no OPENAI_API_KEY, an existing default OAuth record, and no pending record; token contents were not inspected or logged.
 - Task 0: saved agreed plan before implementation and inspected clean status, origin and recent commit style.
+- Task 1: added tests/support/live.rs binary driver (stdio/HTTP MCP, finite time/byte limits, isolated auth, fixed live URL, no-proxy local client, cleanup and sanitized diagnostics), seven offline harness/gate/media regressions, generated 480x260 shapes/text PNG plus intelligible synthetic PCM WAV and regeneration/provenance docs. Audio generated using eSpeak NG 1.51 from pinned Debian image; no runtime fixture tools needed. `cargo test --all-features --locked --test live_harness`, Clippy with warnings denied, fmt and Ruff passed. No live provider calls yet. Custom visible-report integration runner is task 2.
