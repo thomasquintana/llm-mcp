@@ -1,0 +1,12 @@
+ir_version = "0.1"
+
+graph oauth_workflow {
+    inputs = { generation = json }
+    outputs = { generated = json }
+    nodes { generate = call(mcp.tool("llm", "generate")) }
+    edges {
+        edge generation { from = inputs.generation to = generate.inputs.arguments }
+        edge generated { from = generate.outputs.value to = outputs.generated }
+    }
+    limits { max_mcp_calls = 1 }
+}

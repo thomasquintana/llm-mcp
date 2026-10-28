@@ -1,4 +1,4 @@
-//! Stateless OpenAI generation and classification over the Model Context Protocol.
+//! Stateless OpenAI generation, classification, embedding and transcription over MCP.
 
 pub mod auth;
 pub mod config;

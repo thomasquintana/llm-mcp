@@ -394,3 +394,295 @@ async fn http_session_health_calls_and_shutdown() {
         .unwrap()
         .unwrap();
 }
+
+fn media_requests() -> Vec<(&'static str, Value)> {
+    let examples: Value =
+        serde_json::from_str(include_str!("../examples/htlk/requests.json")).unwrap();
+    [
+        ("generate", "generation"),
+        ("classify", "classification"),
+        ("embed", "embedding"),
+        ("transcribe", "transcription"),
+    ]
+    .into_iter()
+    .map(|(tool, key)| (tool, examples[key].clone()))
+    .collect()
+}
+
+async fn media_provider() -> (String, tokio::task::JoinHandle<()>) {
+    use axum::{Json, Router, extract::Multipart, http::HeaderMap, routing::post};
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route("/v1/responses", post(|headers:HeaderMap, Json(body):Json<Value>| async move {
+            assert_eq!(headers["authorization"],"Bearer test");
+            let image = &body["input"][0]["content"][1]["image_url"];
+            assert!(image.as_str().unwrap().starts_with("data:image/png;base64,"));
+            Json(json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"A detailed equipment description."}]}],"usage":{"input_tokens":5}}))
+        }))
+        .route("/v1/decisions", post(|Json(body):Json<Value>| async move {
+            assert!(body["input"][0]["content"][1]["image_url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+            Json(json!({"answers":[{"name":"refund","type":"predicate","probability":0.95}]}))
+        }))
+        .route("/v1/embeddings", post(|Json(body):Json<Value>| async move {
+            assert_eq!(body["input"],json!(["Context:\nEquipment photograph for maintenance search.\n\nImage description:\nA detailed equipment description."]));
+            assert!(body.get("description").is_none());
+            Json(json!({"data":[{"index":0,"embedding":[0.1,0.2]}],"usage":{"total_tokens":10}}))
+        }))
+        .route("/v1/audio/transcriptions", post(|mut multipart:Multipart| async move {
+            let mut found = false;
+            while let Some(field) = multipart.next_field().await.unwrap() {
+                if field.name() == Some("file") {
+                    assert_eq!(field.file_name(),Some("sample.wav"));
+                    assert_eq!(field.content_type(),Some("audio/wav"));
+                    let bytes = field.bytes().await.unwrap();
+                    assert_eq!(bytes.as_ref(), STANDARD.decode("UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA==").unwrap());
+                    found = true;
+                }
+            }
+            assert!(found);
+            Json(json!({"text":"Transcription OK.","usage":{"total_tokens":7}}))
+        }));
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (base, task)
+}
+
+fn assert_media_result(tool: &str, response: Value) {
+    let result = &response["result"];
+    assert_eq!(result["isError"], false, "{response}");
+    let value = &result["structuredContent"];
+    assert_eq!(
+        serde_json::from_str::<Value>(result["content"][0]["text"].as_str().unwrap()).unwrap(),
+        *value
+    );
+    match tool {
+        "generate" => assert_eq!(
+            value["output"][0]["content"][0]["text"],
+            "A detailed equipment description."
+        ),
+        "classify" => assert_eq!(value["answers"][0]["probability"], 0.95),
+        "embed" => {
+            assert_eq!(value["response"]["data"][0]["embedding"], json!([0.1, 0.2]));
+            assert_eq!(
+                value["prepared_inputs"][0]["description"],
+                "A detailed equipment description."
+            );
+            assert_eq!(
+                value["prepared_inputs"][0]["description_usage"]["input_tokens"],
+                5
+            );
+        }
+        "transcribe" => assert_eq!(value["text"], "Transcription OK."),
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn stdio_executes_all_media_tools_over_independent_json_rpc() {
+    let (base, mock) = media_provider().await;
+    let mut child = stdio_command()
+        .arg("serve")
+        .env("OPENAI_API_KEY", "test")
+        .env("OPENAI_BASE_URL", base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+    input
+        .write_all(format!("{}\n", initialize()).as_bytes())
+        .await
+        .unwrap();
+    output.next_line().await.unwrap().unwrap();
+    input
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+        .await
+        .unwrap();
+    for (id, (tool, arguments)) in media_requests().into_iter().enumerate() {
+        let request = json!({"jsonrpc":"2.0","id":id+2,"method":"tools/call","params":{"name":tool,"arguments":arguments}});
+        input
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        let line = tokio::time::timeout(Duration::from_secs(5), output.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_media_result(tool, serde_json::from_str(&line).unwrap());
+    }
+    drop(input);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    mock.abort();
+}
+
+#[tokio::test]
+async fn http_executes_all_media_tools_over_independent_json_rpc() {
+    let (base, mock) = media_provider().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+    let config = Config::from_lookup(|key| match key {
+        "OPENAI_API_KEY" => Some("test".into()),
+        "OPENAI_BASE_URL" => Some(base.clone()),
+        _ => None,
+    })
+    .unwrap();
+    let shutdown = CancellationToken::new();
+    let stop = shutdown.clone();
+    let task = tokio::spawn(async move {
+        runtime::serve_http(listener, config, stop).await.unwrap();
+    });
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("accept", "application/json, text/event-stream")
+        .json(&initialize())
+        .send()
+        .await
+        .unwrap();
+    let session = response.headers()["mcp-session-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    decode_http(response).await;
+    let post = |body: Value| {
+        client
+            .post(&url)
+            .header("accept", "application/json, text/event-stream")
+            .header("mcp-protocol-version", "2025-11-25")
+            .header("mcp-session-id", &session)
+            .json(&body)
+    };
+    post(json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+        .send()
+        .await
+        .unwrap();
+    for (id, (tool, arguments)) in media_requests().into_iter().enumerate() {
+        let response=post(json!({"jsonrpc":"2.0","id":id+2,"method":"tools/call","params":{"name":tool,"arguments":arguments}})).send().await.unwrap();
+        assert_media_result(tool, decode_http(response).await);
+    }
+    client
+        .delete(&url)
+        .header("mcp-session-id", session)
+        .send()
+        .await
+        .unwrap();
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+    mock.abort();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn oauth_stdio_discovers_only_generation_and_rejects_other_tools() {
+    use axum::{Json, Router, http::HeaderMap, routing::post};
+    use std::io::Write;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("auth.json");
+    let mut source = tempfile::NamedTempFile::new_in(temp.path()).unwrap();
+    let expires = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    write!(source,"{}",json!({"issuer":"https://auth.openai.com","subject":"mock","email":null,"client_id":"oaiapp_mock","ext_agent_host_id":"urn:uuid:transferred","id_token":"mock","access_token":"oauth-test","refresh_token":"mock","scopes":["chatgpt.tokens.use.direct"],"expires_at":expires})).unwrap();
+    llm_mcp::auth::import(&path, source.path()).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let mock = tokio::spawn(async move {
+        axum::serve(listener,Router::new().route("/v1/responses",post(|headers:HeaderMap,Json(body):Json<Value>|async move {
+            assert_eq!(headers["authorization"],"Bearer oauth-test");
+            assert_eq!(body["stream"],true);
+            assert_eq!(body["store"],false);
+            assert!(body["input"][0]["content"][1]["image_url"].as_str().unwrap().starts_with("data:image/png;base64,"));
+            ([("content-type","text/event-stream")],"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n")
+        }))).await.unwrap();
+    });
+    let mut child = stdio_command()
+        .arg("serve")
+        .env("LLM_MCP_AUTH", "oauth")
+        .env("LLM_MCP_OAUTH_CREDENTIALS_PATH", &path)
+        .env("OPENAI_BASE_URL", base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+    input
+        .write_all(format!("{}\n", initialize()).as_bytes())
+        .await
+        .unwrap();
+    output.next_line().await.unwrap().unwrap();
+    input
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+        .await
+        .unwrap();
+    let generation = media_requests().remove(0).1;
+    for (id, request) in [
+        json!({"method":"tools/list"}),
+        json!({"method":"tools/call","params":{"name":"classify","arguments":{}}}),
+        json!({"method":"tools/call","params":{"name":"embed","arguments":{}}}),
+        json!({"method":"tools/call","params":{"name":"transcribe","arguments":{}}}),
+        json!({"method":"tools/call","params":{"name":"generate","arguments":generation}}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut request = request;
+        request["jsonrpc"] = json!("2.0");
+        request["id"] = json!(id + 2);
+        input
+            .write_all(format!("{request}\n").as_bytes())
+            .await
+            .unwrap();
+        let response: Value = serde_json::from_str(
+            &tokio::time::timeout(Duration::from_secs(5), output.next_line())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        match id {
+            0 => assert_eq!(
+                response["result"]["tools"],
+                serde_json::to_value(mcp::tools(AuthMode::OAuth)).unwrap()
+            ),
+            1..=3 => assert_eq!(
+                response["result"]["structuredContent"]["error"]["code"],
+                "tool_disabled"
+            ),
+            _ => assert_eq!(
+                response["result"]["structuredContent"]["status"],
+                "completed"
+            ),
+        }
+    }
+    drop(input);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+    mock.abort();
+}

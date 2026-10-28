@@ -1,7 +1,7 @@
 # llm-mcp
 
-A Rust MCP server exposing **OpenAI Responses as `generate`** and **OpenAI Decisions
-as `classify`**. Designed for HTLK, standalone containers, and Kubernetes.
+A Rust MCP server exposing OpenAI through **`generate`**, **`classify`**, **`embed`**,
+and **`transcribe`**. Designed for HTLK, standalone containers, and Kubernetes.
 
 ## Install and run
 
@@ -25,9 +25,18 @@ The HTTP endpoint is `/mcp`, with `/health/live` and `/health/ready` probes. Use
 
 ## Tools
 
-Tool arguments are provider request objects, with caller-selected models and
-options. Full conversation context, function calls/outputs, base64 images,
-and newly introduced provider fields are preserved. Example `generate` arguments:
+Models and provider options are caller-selected. Generation/classification preserve
+full provider request/response objects; embedding adds an optional image-description
+pipeline, and transcription converts base64 audio into a multipart upload.
+
+| Tool | API-key mode | OAuth mode | Provider operation |
+|---|---|---|---|
+| `generate` | Enabled | Enabled | Responses, with text/base64 image input |
+| `classify` | Enabled | Disabled | Decisions, with text/base64 image input |
+| `embed` | Enabled | Disabled | Text/token embeddings, optionally from image descriptions |
+| `transcribe` | Enabled | Disabled | Audio transcription from base64 bytes |
+
+Example `generate` arguments:
 
 ```json
 {
@@ -42,7 +51,7 @@ and newly introduced provider fields are preserved. Example `generate` arguments
 The caller executes functions and supplies their results in a follow-up call.
 Reasoning effort is a generation option, so there is no separate `reason` tool.
 
-`generate` and `classify` accept mixed content such as:
+`generate` and `classify` accept mixed content in `input`, such as:
 
 ```json
 [
@@ -73,10 +82,76 @@ Classification supports multiple named predicate, choice and score questions ove
 shared input. The caller applies probabilities/confidence to its own decision
 logic. Per-question refusals are retained alongside other answers.
 
-Successful results contain the **complete OpenAI response object in MCP
-`structuredContent`**, plus the same JSON in a compatibility text block. Errors
+### Embeddings
+
+Standard text/token requests use OpenAI's embedding fields:
+
+```json
+{"model":"text-embedding-3-small","input":["First document","Second document"]}
+```
+
+For images, use `inputs` instead of `input` and select a description model:
+
+```json
+{
+  "model": "text-embedding-3-small",
+  "inputs": [
+    {"content": [
+      {"type":"input_text","text":"Equipment photograph for maintenance search."},
+      {"type":"input_image","image_url":"data:image/png;base64,<encoded-image>"}
+    ]}
+  ],
+  "description": {
+    "model": "gpt-4.1-mini",
+    "instructions": "Retain visible equipment labels."
+  }
+}
+```
+
+Each item produces one vector. Multiple images in an item are described together;
+the **original context plus detailed description** becomes the embedding input.
+Image-only items receive a general detailed description; text-only items embed
+directly. All descriptions must succeed before the single final embedding batch.
+Any preparation failure fails the call and skips embedding, although earlier
+description requests may already have incurred usage.
+
+Results use `{response, prepared_inputs}`: `response` is the complete embedding
+provider object, and prepared items include their index and exact submitted text.
+Image items also include `description`, `description_model` and returned
+`description_usage`. Standard `input` requests have an empty `prepared_inputs` list.
+These are embeddings of descriptions; [details and limits](docs/media.md).
+
+### Transcription
+
+```json
+{
+  "model": "gpt-4o-transcribe",
+  "file": {
+    "filename": "meeting.mp3",
+    "mime_type": "audio/mpeg",
+    "data_base64": "<encoded-audio>"
+  },
+  "language": "en",
+  "response_format": "json"
+}
+```
+
+Audio is base64 bytes with filename/MIME metadata, without a data URL prefix.
+URLs, paths and file IDs are rejected. The server decodes the bytes and uploads
+them to OpenAI's transcription API. Provider options support prompting, timestamps,
+log probabilities and diarization where the selected model permits them. Known
+speaker references use base64 audio data URLs. JSON responses are preserved;
+text/SRT/VTT responses become `{text, response_format}` with exact content.
+See [media formats, examples and limits](docs/media.md).
+
+### Results and execution
+
+Successful results are JSON objects in MCP `structuredContent`, plus the same JSON
+in a text block. Generation/classification and JSON transcription retain the full
+provider object; embedding and text transcription use the envelopes above. Errors
 use `isError:true` with an `error` object containing `code`, `message`, `retryable`
-and optional provider `status`/`request_id`. Automatic provider retries are disabled.
+and optional `status`, `request_id` and failed preparation `input_index`.
+Automatic provider retries are disabled.
 
 Calls are stateless and return one completed result. `stream:true` and
 `background:true` are explicitly rejected. Requests are bounded by configurable
@@ -106,7 +181,8 @@ access; see [login, refresh and remote deployment](docs/oauth.md).
 - [Acceptance evidence and verification boundaries](docs/verification.md)
 
 MCP protocol compatibility is pinned to **2025-11-25** for HTLK. Export descriptors
-using `llm-mcp catalog`, or HTLK inputs using `llm-mcp catalog --htlk`.
+using `llm-mcp catalog`, or HTLK inputs using `llm-mcp catalog --htlk`. Exports reflect
+`LLM_MCP_AUTH` and require no credentials.
 
 ## License
 

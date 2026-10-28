@@ -70,8 +70,21 @@ def exercise(container, oauth=False):
     )
     assert response["result"]["serverInfo"]["name"] == "llm-mcp"
     rpc(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, session)
-    tools = ("generate",) if oauth else ("generate", "classify")
-    for index, tool in enumerate(tools, 2):
+    examples = json.loads(
+        (
+            Path(__file__).resolve().parents[1] / "examples/htlk/requests.json"
+        ).read_text()
+    )
+    names = {
+        "generate": "generation",
+        "classify": "classification",
+        "embed": "embedding",
+        "transcribe": "transcription",
+    }
+    tools = ("generate",) if oauth else tuple(names)
+    listed, _ = rpc(url, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, session)
+    assert [tool["name"] for tool in listed["result"]["tools"]] == list(tools)
+    for index, tool in enumerate(tools, 3):
         response, _ = rpc(
             url,
             {
@@ -80,10 +93,7 @@ def exercise(container, oauth=False):
                 "method": "tools/call",
                 "params": {
                     "name": tool,
-                    "arguments": {
-                        "model": "mock",
-                        "input": [{"role": "user", "content": "hello"}],
-                    },
+                    "arguments": examples[names[tool]],
                 },
             },
             session,
@@ -99,8 +109,31 @@ def exercise(container, oauth=False):
                 if part.get("type") == "output_text"
             )
             assert text == "Hello", "successful generation must retain its output text"
-        else:
+        elif tool == "classify":
             assert value["answers"][0]["probability"] == 0.95
+        elif tool == "embed":
+            assert value["response"]["data"][0]["embedding"] == [0.1, 0.2]
+            assert value["prepared_inputs"][0]["description"] == "Hello"
+            assert "Equipment photograph" in value["prepared_inputs"][0]["text"]
+        else:
+            assert value["text"] == "Transcription OK."
+    if oauth:
+        for index, tool in enumerate(("classify", "embed", "transcribe"), 10):
+            rejected, _ = rpc(
+                url,
+                {
+                    "jsonrpc": "2.0",
+                    "id": index,
+                    "method": "tools/call",
+                    "params": {"name": tool, "arguments": {}},
+                },
+                session,
+            )
+            assert rejected["result"]["isError"]
+            assert (
+                rejected["result"]["structuredContent"]["error"]["code"]
+                == "tool_disabled"
+            )
 
 
 def start(image, port, extra=(), oauth=False):
@@ -270,7 +303,7 @@ def main():
         docker("stop", "--time=10", container)
         assert docker("inspect", "--format={{.State.ExitCode}}", container) == "0"
         print(
-            "Container API-key/OAuth generation, classification, graceful termination, credential import and remount permission repair passed."
+            "Container API-key tools, OAuth-only generation, graceful termination, credential import and remount permission repair passed."
         )
     finally:
         if container:

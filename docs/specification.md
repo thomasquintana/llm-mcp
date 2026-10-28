@@ -37,8 +37,9 @@ response_format defaults to json. Complete json, verbose_json and diarized_json
 objects are preserved; text, srt and vtt return `{text, response_format}` with exact
 UTF-8 content. Multipart overhead counts against the request byte limit.
 
-MCP arguments and structured results are JSON objects. Both tools publish stable
-input/output schemas. Successful structuredContent is the full provider response.
+MCP arguments and structured results are JSON objects. All four tools publish stable
+input/output schemas. Successful structuredContent preserves full provider objects,
+with the embedding/text-transcription envelopes described above.
 The HTLK integration requires MCP 2025-11-25 and matching catalog descriptors.
 
 Reject `stream: true` and `background: true`. Each call returns a completed result.

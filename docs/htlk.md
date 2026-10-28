@@ -8,10 +8,17 @@ llm-mcp catalog --htlk --transport stdio
 llm-mcp catalog --htlk --transport streamable_http
 ```
 
-The exporter requires no credentials. `examples/htlk/workflow.htlk` accepts complete
-generation/classification request objects and exposes full provider results. The
-adjacent `requests.json` supplies generation and batched predicate/choice/score
-examples. Model availability depends on the signed-in account.
+The exporter requires no credentials and selects tools using `LLM_MCP_AUTH`.
+`examples/htlk/workflow.htlk` exercises all four API-key-mode tools. Adjacent
+`requests.json` includes mixed text/base64 images, batched classification,
+contextual image embedding and base64 transcription. Its tiny media fixtures
+demonstrate encoding; replace them with your own content for useful live results.
+Model availability depends on provider access.
+
+For OAuth, use `LLM_MCP_AUTH=oauth llm-mcp catalog --htlk`, the checked-in
+`*.oauth.catalogs.json` files, and `oauth.htlk` with `oauth.requests.json`.
+Only `generate` is available in that mode. Do not include OPENAI_API_KEY in an
+OAuth deployment's environment.
 
 For stdio, configure the HTLK deployment `llm-mcp` with the installed executable,
 arguments `["serve"]`, and environment settings including `LLM_MCP_TRANSPORT=stdio`

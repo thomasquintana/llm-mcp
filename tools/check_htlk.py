@@ -2,6 +2,9 @@
 """Opt-in real sibling HTLK integration over both transports, using a local provider."""
 
 import argparse
+import base64
+from email import policy
+from email.parser import BytesParser
 import http.server
 import json
 import os
@@ -18,7 +21,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Provider(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        payload = self.rfile.read(int(self.headers["Content-Length"]))
+        if self.path.endswith("audio/transcriptions"):
+            message = BytesParser(policy=policy.default).parsebytes(
+                f"Content-Type: {self.headers['Content-Type']}\r\nMIME-Version: 1.0\r\n\r\n".encode()
+                + payload
+            )
+            parts = {
+                part.get_param("name", header="Content-Disposition"): part
+                for part in message.iter_parts()
+            }
+            example = json.loads((ROOT / "examples/htlk/requests.json").read_text())
+            audio = example["transcription"]["file"]
+            assert parts["file"].get_payload(decode=True) == base64.b64decode(
+                audio["data_base64"]
+            )
+            assert parts["file"].get_filename() == audio["filename"]
+            assert parts["file"].get_content_type() == audio["mime_type"]
+            request = {"model": parts["model"].get_payload(decode=True).decode()}
+        else:
+            request = json.loads(payload)
         oauth = self.path.endswith(
             "responses"
         ) and "text/event-stream" in self.headers.get("Accept", "")
@@ -26,8 +48,8 @@ class Provider(http.server.BaseHTTPRequestHandler):
             "Bearer oauth-integration-test" if oauth else "Bearer integration-test"
         )
         assert "model" in request
-        response = (
-            {
+        if self.path.endswith("responses"):
+            response = {
                 "id": "resp_test",
                 "status": "completed",
                 "output": [
@@ -37,13 +59,30 @@ class Provider(http.server.BaseHTTPRequestHandler):
                     }
                 ],
             }
-            if self.path.endswith("responses")
-            else {
+        elif self.path.endswith("decisions"):
+            response = {
                 "answers": [
                     {"name": "refund", "type": "predicate", "probability": 0.95}
                 ]
             }
-        )
+        elif self.path.endswith("embeddings"):
+            inputs = request["input"]
+            if isinstance(inputs, str):
+                inputs = [inputs]
+            assert all(isinstance(text, str) for text in inputs)
+            response = {
+                "object": "list",
+                "model": request["model"],
+                "data": [
+                    {"object": "embedding", "index": index, "embedding": [0.1, 0.2]}
+                    for index in range(len(inputs))
+                ],
+                "usage": {"total_tokens": 9},
+            }
+        elif self.path.endswith("audio/transcriptions"):
+            response = {"text": "Transcription OK.", "usage": {"total_tokens": 7}}
+        else:
+            raise AssertionError(f"unexpected provider endpoint: {self.path}")
         if oauth:
             # Match live OAuth: no Content-Type and metadata-only terminal output.
             events = [

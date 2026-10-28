@@ -62,6 +62,10 @@ Recreate updates. API-key-only deployments need no OAuth volume.
 ## OAuth request differences
 
 OpenAI documents ChatGPT plan use for eligible Responses requests, not Decisions.
+The documented flow also excludes transcription and does not provide the embedding
+endpoint. The server therefore exposes only `generate` in OAuth mode; use a separate
+API-key-mode instance when the other tools are needed. Catalog export respects
+`LLM_MCP_AUTH` without opening credential state.
 OAuth requests must supply full history as an input array. The server internally
 sets `store:false` and `stream:true`, consumes SSE through `response.completed`, and
 returns the completed response object. Failed/incomplete/interrupted streams are

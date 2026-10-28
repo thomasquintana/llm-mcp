@@ -17,8 +17,8 @@ request fields; model selection and reasoning effort belong to each call.
 | `LLM_MCP_OAUTH_CREDENTIALS_PATH` | `$HOME/.config/llm-mcp/auth.json` | Writable OAuth state; container default `/state/auth.json` |
 | `LLM_MCP_TIMEOUT_MS` | `120000` | Total call deadline including waiting for concurrency capacity |
 | `LLM_MCP_MAX_CONCURRENCY` | `16` | In-flight provider calls per instance |
-| `LLM_MCP_MAX_REQUEST_BYTES` | `8388608` | Serialized provider request bound |
-| `LLM_MCP_MAX_RESPONSE_BYTES` | `16777216` | Provider body/SSE stream byte bound |
+| `LLM_MCP_MAX_REQUEST_BYTES` | `8388608` | Encoded arguments, decoded media and outbound JSON/multipart request bound |
+| `LLM_MCP_MAX_RESPONSE_BYTES` | `16777216` | Provider body/SSE stream and assembled result byte bound |
 | `RUST_LOG` | `llm_mcp=info` | Tracing filter; logs go to stderr |
 
 Numeric limits must be positive integers. Base URLs must be HTTP(S), without
@@ -30,9 +30,12 @@ MCP wire requests have an additional 64 KiB framing allowance. Oversized HTTP
 requests receive HTTP 413. Oversized stdio lines are discarded by the transport.
 Provider results have a compatibility text copy in addition to structuredContent,
 so configure client transport bounds for the larger serialized MCP envelope.
+Base64 expands raw media by roughly 4/3: the default request bound permits about
+6 MiB of media, less metadata. Transcription multipart overhead also counts. See
+[media contracts and limits](media.md).
 
 HTTP sessions keep protocol metadata and require affinity across replicas.
-Generation/classification never retain application conversation history. A
+Tools never retain application conversation history or media. A
 Platform API-key caller can explicitly use provider-managed references supported
 by its API; OAuth requires full input history and `store:false`. See [OAuth](oauth.md).
 

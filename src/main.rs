@@ -5,7 +5,10 @@ use llm_mcp::{auth, config::Config, error::Result};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(version, about = "OpenAI generation and decisions over MCP")]
+#[command(
+    version,
+    about = "OpenAI generation, decisions, embeddings and transcription over MCP"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

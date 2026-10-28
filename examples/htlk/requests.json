@@ -1,17 +1,36 @@
 {
   "generation": {
     "model": "gpt-6.1-sol",
-    "input": [{"role": "user", "content": "Say hello."}],
+    "input": [{"role": "user", "content": [
+      {"type":"input_text","text":"Say hello and describe this image."},
+      {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII="}
+    ]}],
     "reasoning": {"effort": "low"},
     "store": false
   },
   "classification": {
     "model": "gpt-6-luna",
-    "input": "Please refund the duplicate charge.",
+    "input": [{"role":"user","content":[
+      {"type":"input_text","text":"Please refund the duplicate charge shown here."},
+      {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII="}
+    ]}],
     "questions": [
       {"name": "refund", "type": "predicate", "instructions": "Does the customer request a refund?"},
       {"name": "department", "type": "choice", "instructions": "Which department should handle this?", "choices": [{"value": "billing", "description": "Payments and refunds."}, {"value": "other", "description": "Other topics."}]},
       {"name": "urgency", "type": "score", "instructions": "How urgent is the request?", "levels": [{"label": "routine", "description": "No urgency expressed."}, {"label": "urgent", "description": "Immediate attention requested."}]}
     ]
+  },
+  "embedding": {
+    "model":"text-embedding-3-small",
+    "inputs":[{"content":[
+      {"type":"input_text","text":"Equipment photograph for maintenance search."},
+      {"type":"input_image","image_url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII="}
+    ]}],
+    "description":{"model":"gpt-4.1-mini","instructions":"Retain visible equipment labels."}
+  },
+  "transcription": {
+    "model":"gpt-4o-transcribe",
+    "file":{"filename":"sample.wav","mime_type":"audio/wav","data_base64":"UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQIAAAAAAA=="},
+    "response_format":"json"
   }
 }
