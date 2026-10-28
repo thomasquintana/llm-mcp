@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Automatically run real OpenAI E2E tests over stdio and HTTP when an API key or stored OAuth credentials are available, with independent gates, visible skips, semantic media checks and isolated authentication.
+
 - Add base64-only `transcribe` with bounded multipart uploads, native transcription options and complete JSON/diarization or text/subtitle results.
 
 - Add `embed` for OpenAI text/token embeddings and ordered image-description batches, embedding original context plus description with indexed preparation and usage metadata.

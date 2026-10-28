@@ -11,6 +11,10 @@ keywords = ["mcp", "openai", "llm", "classification"]
 categories = ["command-line-utilities", "web-programming"]
 exclude = [".opencode/", "deploy/", ".github/"]
 
+[[test]]
+name = "provider_e2e"
+harness = false
+
 [dependencies]
 axum = "0.8"
 base64 = "0.23"
