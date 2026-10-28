@@ -16,7 +16,8 @@ Supported image MIME types are `image/png`, `image/jpeg`, `image/webp`, and
 `image/gif`. `detail` and other provider image options are preserved. HTTP(S) image
 URLs, image file IDs, local references, malformed/empty base64 and unsupported MIME
 types fail before provider dispatch. The same validation covers user-message
-content, function/custom tool-output evidence and Decisions question instructions.
+content, function/custom tool-output evidence, computer screenshots and Decisions
+question instructions.
 Unrelated JSON and metadata are preserved without interpreting them as media.
 
 `generate` and `classify` use `input_text`/`input_image` parts, not Chat Completions'

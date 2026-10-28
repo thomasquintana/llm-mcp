@@ -194,6 +194,43 @@ async fn rejects_non_base64_images_in_all_supported_content_locations() {
 }
 
 #[tokio::test]
+async fn validates_computer_screenshots_without_interpreting_unrelated_objects() {
+    let f = fixture(
+        json!({"status":"completed","output":[]}),
+        StatusCode::OK,
+        Duration::ZERO,
+        &[],
+    )
+    .await;
+    let request = json!({"input":[{"type":"computer_call_output","call_id":"c","output":{"type":"computer_screenshot","image_url":"data:image/png;base64,eA=="}}]});
+    f.provider
+        .call(
+            Operation::Generate,
+            request.clone(),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.captured.lock().await.recv().await.unwrap().1, request);
+    for screenshot in [
+        json!({"type":"computer_screenshot","image_url":"https://example.com/image.png"}),
+        json!({"type":"computer_screenshot","file_id":"file-image"}),
+    ] {
+        let request =
+            json!({"input":[{"type":"computer_call_output","call_id":"c","output":screenshot}]});
+        assert_eq!(
+            f.provider
+                .call(Operation::Generate, request, CancellationToken::new())
+                .await
+                .unwrap_err()
+                .code,
+            "invalid_media"
+        );
+    }
+    assert!(f.captured.lock().await.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn rejects_background_and_streaming_before_network_dispatch() {
     let f = fixture(json!({}), StatusCode::OK, Duration::ZERO, &[]).await;
     for request in [

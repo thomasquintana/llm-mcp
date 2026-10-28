@@ -69,15 +69,21 @@ impl Budget {
     fn parts(&mut self, parts: &Value) -> Result<()> {
         if let Some(parts) = parts.as_array() {
             for part in parts {
-                match part.get("type").and_then(Value::as_str) {
-                    Some("input_image") => self.image(part)?,
-                    // Chat Completions is not the request format of these tools.
-                    Some("image_url") => return Err(invalid()),
-                    _ => {}
-                }
+                self.part(part)?;
             }
+        } else {
+            self.part(parts)?;
         }
         Ok(())
+    }
+
+    fn part(&mut self, part: &Value) -> Result<()> {
+        match part.get("type").and_then(Value::as_str) {
+            Some("input_image" | "computer_screenshot") => self.image(part),
+            // Chat Completions is not the request format of these tools.
+            Some("image_url") => Err(invalid()),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -85,6 +91,7 @@ pub(super) fn validate_images(arguments: &Value, limit: usize) -> Result<()> {
     let mut budget = Budget::new(limit);
     if let Some(items) = arguments.get("input").and_then(Value::as_array) {
         for item in items {
+            budget.part(item)?;
             if let Some(parts) = item.get("content") {
                 budget.parts(parts)?;
             }

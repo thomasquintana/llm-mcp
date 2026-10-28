@@ -1,5 +1,47 @@
 # v0.1 acceptance evidence
 
+## Multimodal tools update — 2026-10-28
+
+Verified locally on macOS ARM64, with a native Linux ARM64 Docker runtime:
+
+- **56 Rust tests** pass on Rust **1.98.0** (the declared minimum) and **1.99.1**.
+  All-target/all-feature Clippy passes with warnings denied on both toolchains.
+  Formatting and rustdoc with warnings denied pass.
+- LLVM line coverage is **87.38%**. Media validation and the new embedding and
+  transcription modules each reach at least 95% line coverage.
+- **12 Python tooling tests**, Ruff, and actionlint **1.7.12** pass.
+- `cargo deny check` passes advisory/source/license/bans policy with the existing
+  transitive-duplicate and unused-license-allowance warnings. Generated notices
+  match the updated lockfile, and all four mode/transport catalogs pass drift checks.
+- Cargo packaging succeeds in a fresh target directory, including independent
+  compilation of the staged crate.
+- Independent stdio and Streamable HTTP JSON-RPC tests exercise all four API-key
+  tools with base64 image/audio input and verify returned data. A Unix stdio OAuth
+  test verifies image generation, generation-only discovery, and rejection of all
+  three disabled tools.
+- Provider regressions independently parse multipart uploads and verify exact file
+  bytes, filename, MIME type, repeated/nested options and known-speaker samples.
+  All six transcription result formats, malformed input, request/result bounds,
+  cancellation, deadlines and sanitized failures are covered.
+- Embedding regressions verify shared-context multi-image descriptions, original
+  context plus description as the exact embedding text, batch ordering, indexed
+  preparation/model/usage metadata, whole-call failure, and no embedding request
+  after a preparation failure. Pipelines work with concurrency one and share one
+  end-to-end deadline. Computer screenshot evidence follows the same base64 rule.
+- The actual sibling HTLK compiler/runtime successfully executes the four-tool
+  workflow and function continuation over both transports against local providers.
+- The updated nonroot container builds using Rust **1.98.0** and passes API-key
+  generation/classification/embedding/transcription, OAuth-only generation and
+  disabled-tool checks, graceful shutdown, persistent identity, credential import
+  and remount permission repair. Both Compose configurations validate, and
+  kubeconform **0.7.0** strictly validates all six Kubernetes resources.
+
+These checks use mock provider responses and credentials. Live Platform image
+interpretation, embedding quality and audio transcription were not executed in
+this update. Windows-native behavior, other release targets, live Kubernetes
+deployment and registry/crates.io publication remain external CI/operator checks.
+The earlier acceptance evidence below is retained as historical evidence.
+
 Local verification on 2026-10-26 used macOS ARM64, Rust 1.98.0 (the declared minimum)
 and Rust 1.99.1 (current stable), plus a native Linux ARM64 Docker runtime.
 
