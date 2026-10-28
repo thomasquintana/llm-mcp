@@ -4,6 +4,10 @@
 !rust-toolchain.toml
 !src/
 !src/**
+!tests/
+!tests/**
+!examples/
+!examples/**
 !README.md
 !LICENSE
 !THIRD_PARTY_LICENSES

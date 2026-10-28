@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends cmake clang pkg
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src ./src
+# Cargo scans explicit test targets even for a release-only build.
+COPY tests ./tests
+COPY examples ./examples
 COPY README.md LICENSE THIRD_PARTY_LICENSES ./
 RUN cargo build --release --locked
 

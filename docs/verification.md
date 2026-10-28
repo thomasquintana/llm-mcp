@@ -1,5 +1,42 @@
 # v0.1 acceptance evidence
 
+## Automatic live-provider E2E update — 2026-10-28
+
+- An ordinary `cargo test --all-features --locked` run passed **66 deterministic
+  Rust regressions** and automatically ran the available real OAuth suite against
+  `https://api.openai.com/v1/`, using `gpt-6.1-sol`.
+- The live OAuth suite passed **12 checks**: discovery, text generation, base64
+  image interpretation, and local rejection of classification/embedding/
+  transcription, over **both stdio and HTTP**. Four generation requests reached
+  OpenAI through actual `llm-mcp` child processes. Image assertions verified the
+  red square, blue circle and printed number in the committed fixture.
+- `OPENAI_API_KEY` was absent, so the API-key suite explicitly reported a skip.
+  Its live classification, embedding and audio-transcription scenarios are
+  implemented, but were **not executed against OpenAI** in this update.
+- A credential-free run reported two skipped suites and “No live OpenAI tests
+  executed.” Suite listing and standard test filters were verified without live
+  calls. Ten offline regressions cover credential gates, present-but-invalid
+  OAuth state, API authentication rejection, auth isolation, process cleanup,
+  semantic assertions, result redaction and fixture validity.
+- Formatting, all-target/all-feature Clippy with warnings denied, warnings-denied
+  rustdoc, dependency policy, generated notices and catalog checks pass. The
+  deterministic suite also passes on explicit Rust **1.99.1**, with live suites
+  filtered out to avoid repeating provider usage. The primary run used **1.98.0**.
+- **12 Python tooling tests** and Ruff pass. LLVM production line coverage is
+  **87.77%**, measured in an explicitly credential-free environment so coverage
+  does not depend on external service access.
+- Packaging succeeds with independent compilation in a fresh target directory.
+  The explicit Cargo test target required adding test/fixture/example sources to
+  the Docker build context; the corrected Linux ARM64/Rust 1.98 container builds
+  and passes the existing mock-backed API-key/OAuth smoke tests.
+
+Tests now activate real service calls automatically when the corresponding
+credentials exist; this replaces the former opt-in live-test policy. The
+[testing guide](testing.md) documents independent gates, model overrides, filters,
+credential ownership, usage and skip/failure reporting. No new native Windows
+execution or live API-key-provider validation is claimed. Earlier evidence below
+is historical and retains its original execution boundaries.
+
 ## Multimodal tools update — 2026-10-28
 
 Verified locally on macOS ARM64, with a native Linux ARM64 Docker runtime:

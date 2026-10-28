@@ -13,9 +13,12 @@ RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps --locked
 cargo package --locked --allow-dirty
 ```
 
-Use a fresh `CARGO_TARGET_DIR` for final packaging checks. Tests must run without
-provider credentials. Live provider checks are opt-in. Keep credentials and runtime
-authentication state out of source control.
+Use a fresh `CARGO_TARGET_DIR` for final packaging checks. Tests support runs without
+provider credentials. Real OpenAI E2E suites run automatically when an API key or
+stored OAuth credentials are available; missing credentials produce explicit skips.
+Present-but-invalid credentials and provider failures fail the suite. See
+[live-provider testing](docs/testing.md) for gates, model overrides and filters.
+Keep credentials and runtime authentication state out of source control.
 
 Additional gates:
 
@@ -37,8 +40,9 @@ cargo about generate about.hbs --locked --fail --output-file THIRD_PARTY_LICENSE
 ```
 
 Keep the coverage floor at least 70%; increase it as meaningful regression coverage
-is added. Browser authorization and external provider account access are explicitly
-opt-in. Core tests, real MCP wire tests and mock-provider tests run offline after
+is added. Browser authorization is never automated by tests. Live provider tests
+consume provider usage when credentials are available, including during coverage
+runs. Core tests, mocked MCP wire tests and mock-provider tests run offline after
 dependencies are available. `python3 tools/check_htlk.py` optionally exercises the
 actual sibling HTLK compiler/runtime on both transports.
 

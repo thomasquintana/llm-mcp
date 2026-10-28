@@ -177,6 +177,7 @@ access; see [login, refresh and remote deployment](docs/oauth.md).
 - [HTLK catalogs and function continuation](docs/htlk.md)
 - [Specification](docs/specification.md)
 - [Development checks](CONTRIBUTING.md)
+- [Credential-gated live OpenAI E2E tests](docs/testing.md)
 - [Publishing and binary/container releases](docs/releases.md)
 - [Acceptance evidence and verification boundaries](docs/verification.md)
 

@@ -7,6 +7,17 @@ embedding and transcription are disabled in OAuth mode. Authentication never
 automatically falls back or changes billing mode. Inactive OAuth files can remain
 on disk while API-key mode is selected.
 
+## Live-provider tests
+
+`cargo test` automatically exercises real OAuth generation over stdio and HTTP
+when the configured/default OAuth record exists. It skips only when the record
+and pending recovery state are absent; invalid or locked state and provider errors
+fail the test. Tests use the original store and normal refresh ownership, so stop
+other processes using that record first. The test runner removes any API key from
+its OAuth children even if both credentials are available in the parent.
+Use `cargo test --test provider_e2e live_openai_oauth` to select only that suite.
+See [test gates, model overrides and reporting](testing.md).
+
 ## Continue with ChatGPT
 
 ```sh

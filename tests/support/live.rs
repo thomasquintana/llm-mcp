@@ -337,6 +337,7 @@ impl Server {
     }
 
     pub async fn shutdown(mut self) -> Result<()> {
+        let forced = cfg!(not(unix)) && matches!(&self.wire, Wire::Http { .. });
         match &mut self.wire {
             Wire::Stdio { input, .. } => {
                 input.take();
@@ -376,7 +377,7 @@ impl Server {
             .await
             .map_err(|_| Failure::new("MCP shutdown timed out"))?
             .map_err(|_| Failure::new("cannot wait for MCP shutdown"))?;
-        if !status.success() && cfg!(unix) {
+        if !status.success() && !forced {
             return Err(Failure::new("MCP server exited unsuccessfully"));
         }
         Ok(())
