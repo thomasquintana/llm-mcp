@@ -3,6 +3,7 @@
 mod embed;
 mod media;
 mod sse;
+mod transcribe;
 
 use crate::{
     auth::OAuthSession,
@@ -28,6 +29,8 @@ pub enum Operation {
     Classify,
     /// OpenAI text embeddings, optionally prepared from image descriptions.
     Embed,
+    /// OpenAI audio transcription via a base64-to-multipart upload.
+    Transcribe,
 }
 
 /// Reusable connection pool with bounded execution.
@@ -186,7 +189,7 @@ impl Provider {
             .cpu(move || {
                 validate(&arguments)?;
                 bounded_json(&arguments, limit, true)?;
-                if operation != Operation::Embed {
+                if matches!(operation, Operation::Generate | Operation::Classify) {
                     media::validate_images(&arguments, limit)?;
                 }
                 Ok(arguments)
@@ -194,6 +197,7 @@ impl Provider {
             .await??;
         let value = match operation {
             Operation::Embed => self.embed(arguments).await?,
+            Operation::Transcribe => self.transcribe(arguments).await?,
             _ => self.json(operation, arguments).await?,
         };
         let limit = self.config.max_response_bytes;
@@ -219,6 +223,7 @@ impl Provider {
             Operation::Generate => "responses",
             Operation::Classify => "decisions",
             Operation::Embed => "embeddings",
+            Operation::Transcribe => unreachable!("transcription uses multipart"),
         };
         let request = self
             .request(endpoint, oauth)
@@ -276,7 +281,24 @@ impl Provider {
     }
 
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<Response> {
-        let response = request.send().await.map_err(Error::transport)?;
+        let request = request.build().map_err(Error::transport)?;
+        if request
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .is_some_and(|n| n > self.config.max_request_bytes as u64)
+        {
+            return Err(Error::new(
+                "request_too_large",
+                "upload exceeds configured byte limit",
+            ));
+        }
+        let response = self
+            .client
+            .execute(request)
+            .await
+            .map_err(Error::transport)?;
         if !response.status().is_success() {
             return Err(Error::http(&response, false));
         }

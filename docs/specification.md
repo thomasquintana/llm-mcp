@@ -26,6 +26,17 @@ also retain description, description_model and returned description_usage. Stand
 text/token requests return an empty prepared_inputs array. Both stages use API keys
 and share one deadline and concurrency permit.
 
+`transcribe` requires a caller-selected model and
+`file:{filename,mime_type,data_base64}`. The file contains canonical base64 bytes,
+not a URL or path; the server uploads decoded bytes to `/audio/transcriptions` as
+multipart data with the supplied filename and MIME type. Known-speaker references
+must be supported base64 audio data URLs. Scalar options become text fields, scalar
+arrays use repeated `name[]` fields, and nested objects use bracketed field names.
+Provider-specific model/option compatibility is validated by OpenAI. Omitted
+response_format defaults to json. Complete json, verbose_json and diarized_json
+objects are preserved; text, srt and vtt return `{text, response_format}` with exact
+UTF-8 content. Multipart overhead counts against the request byte limit.
+
 MCP arguments and structured results are JSON objects. Both tools publish stable
 input/output schemas. Successful structuredContent is the full provider response.
 The HTLK integration requires MCP 2025-11-25 and matching catalog descriptors.

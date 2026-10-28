@@ -211,6 +211,87 @@
           }
         },
         "server": "llm"
+      },
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Transcribe base64 audio using OpenAI audio/transcriptions. Supply model and file bytes with filename/MIME type; URLs and file references are rejected. Preserve full JSON responses or wrap text/subtitle output. API-key mode only.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "file": {
+                "additionalProperties": false,
+                "properties": {
+                  "data_base64": {
+                    "description": "Canonical base64 file bytes, without a data URL prefix.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "filename": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "mime_type",
+                  "data_base64"
+                ],
+                "type": "object"
+              },
+              "known_speaker_references": {
+                "description": "Base64 audio data URLs only.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "response_format": {
+                "default": "json",
+                "enum": [
+                  "json",
+                  "verbose_json",
+                  "diarized_json",
+                  "text",
+                  "srt",
+                  "vtt"
+                ],
+                "type": "string"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model",
+              "file"
+            ],
+            "type": "object"
+          },
+          "name": "transcribe",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
       }
     ]
   }

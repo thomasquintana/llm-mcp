@@ -39,6 +39,7 @@ impl McpServer {
             "generate" => Operation::Generate,
             "classify" => Operation::Classify,
             "embed" => Operation::Embed,
+            "transcribe" => Operation::Transcribe,
             _ => return Err(ErrorData::invalid_params("unknown tool", None)),
         };
         let outcome = self
@@ -137,6 +138,7 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
         ("generate", "Call OpenAI Responses with text and base64 image input and caller-supplied options. Return the complete response; execute returned function calls in the caller."),
         ("classify", "Call OpenAI Decisions with shared text/base64 image input and named predicate, choice or score questions. Return full answers and probabilities for caller-owned decisions."),
         ("embed", "Embed text/tokens directly or prepare contextual descriptions of base64 images, then embed original context plus description. One vector per item; a preparation failure fails the whole call. Return full embedding response and indexed preparation metadata. API-key mode only."),
+        ("transcribe", "Transcribe base64 audio using OpenAI audio/transcriptions. Supply model and file bytes with filename/MIME type; URLs and file references are rejected. Preserve full JSON responses or wrap text/subtitle output. API-key mode only."),
     ].into_iter().filter(|(name, _)| auth == AuthMode::ApiKey || *name == "generate").map(|(name, description)| {
         let mut input = schema.as_object().expect("static object").clone();
         if name == "classify" {
@@ -149,6 +151,14 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
             properties.insert("description".into(), json!({"type":"object", "required":["model"], "properties":{"model":{"type":"string", "minLength":1}, "instructions":{"type":"string"}}, "additionalProperties":false, "description":"Vision model and optional guidance, required for image-bearing inputs."}));
             input.insert("required".into(), json!(["model"]));
             input.insert("oneOf".into(), json!([{"required":["input"],"not":{"required":["inputs"]}}, {"required":["inputs"],"not":{"required":["input"]}}]));
+        }
+        if name == "transcribe" {
+            let properties = input["properties"].as_object_mut().expect("static properties");
+            properties.remove("input");
+            properties.insert("file".into(), json!({"type":"object", "required":["filename","mime_type","data_base64"], "properties":{"filename":{"type":"string","minLength":1},"mime_type":{"type":"string"},"data_base64":{"type":"string","minLength":1,"description":"Canonical base64 file bytes, without a data URL prefix."}}, "additionalProperties":false}));
+            properties.insert("response_format".into(), json!({"type":"string","enum":["json","verbose_json","diarized_json","text","srt","vtt"],"default":"json"}));
+            properties.insert("known_speaker_references".into(), json!({"type":"array","items":{"type":"string"},"description":"Base64 audio data URLs only."}));
+            input.insert("required".into(), json!(["model","file"]));
         }
         Tool::new(name, description, input).with_raw_output_schema(output.clone())
             .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(false).open_world(true))
