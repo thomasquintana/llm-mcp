@@ -1,4 +1,4 @@
-//! Bounded OpenAI HTTP requests, preserving provider JSON.
+//! Bounded provider HTTP requests, preserving provider JSON.
 
 mod embed;
 mod media;
@@ -7,7 +7,7 @@ mod transcribe;
 
 use crate::{
     auth::OAuthSession,
-    config::{AuthMode, Config},
+    config::{AuthMode, Config, ServiceProvider},
     error::{Error, Result},
 };
 use reqwest::{Client, Response, header};
@@ -49,11 +49,15 @@ pub struct Provider {
 impl Provider {
     /// Construct a provider. No network request is made.
     pub fn new(config: Config) -> Result<Self> {
+        config.provider.validate_auth(config.auth)?;
         match config.auth {
             AuthMode::ApiKey if config.api_key.is_none() => {
                 return Err(Error::new(
                     "configuration",
-                    "API-key mode requires OPENAI_API_KEY",
+                    format!(
+                        "API-key mode requires {}",
+                        config.provider.api_key_variable()
+                    ),
                 ));
             }
             AuthMode::OAuth if config.api_key.is_some() => {
@@ -221,6 +225,9 @@ impl Provider {
             .await??;
         let endpoint = match operation {
             Operation::Generate => "responses",
+            Operation::Classify if self.config.provider == ServiceProvider::OpenRouter => {
+                "/api/alpha/decisions"
+            }
             Operation::Classify => "decisions",
             Operation::Embed => "embeddings",
             Operation::Transcribe => unreachable!("transcription uses multipart"),
@@ -261,7 +268,10 @@ impl Provider {
             self.config.api_key.clone().ok_or_else(|| {
                 Error::new(
                     "authentication",
-                    "OPENAI_API_KEY is required for this operation",
+                    format!(
+                        "{} is required for this operation",
+                        self.config.provider.api_key_variable()
+                    ),
                 )
             })?
         };
@@ -271,10 +281,16 @@ impl Provider {
             .join(endpoint)
             .map_err(|_| Error::new("configuration", "invalid provider endpoint"))?;
         let mut request = self.client.post(url).bearer_auth(key);
-        if !oauth && let Some(value) = &self.config.organization {
+        if !oauth
+            && self.config.provider == ServiceProvider::OpenAI
+            && let Some(value) = &self.config.organization
+        {
             request = request.header("OpenAI-Organization", value);
         }
-        if !oauth && let Some(value) = &self.config.project {
+        if !oauth
+            && self.config.provider == ServiceProvider::OpenAI
+            && let Some(value) = &self.config.project
+        {
             request = request.header("OpenAI-Project", value);
         }
         Ok(request)
@@ -318,11 +334,11 @@ impl Provider {
         let value: Value = self
             .cpu(move || serde_json::from_slice(&bytes))
             .await?
-            .map_err(|_| Error::new("provider_protocol", "OpenAI returned invalid JSON"))?;
+            .map_err(|_| Error::new("provider_protocol", "provider returned invalid JSON"))?;
         if !value.is_object() {
             return Err(Error::new(
                 "provider_protocol",
-                "OpenAI response must be an object",
+                "provider response must be an object",
             ));
         }
         if operation == Operation::Generate

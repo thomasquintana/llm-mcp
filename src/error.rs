@@ -44,7 +44,7 @@ impl Error {
             } else {
                 "transport"
             },
-            "OpenAI transport failed",
+            "provider transport failed",
         );
         result.retryable = true;
         result
@@ -60,7 +60,7 @@ impl Error {
                 400 | 422 => "provider_invalid_request",
                 _ => "provider",
             },
-            format!("OpenAI returned HTTP {}", status.as_u16()),
+            format!("provider returned HTTP {}", status.as_u16()),
         );
         error.retryable = status.as_u16() == 429 || status.is_server_error();
         error.status = Some(status.as_u16());

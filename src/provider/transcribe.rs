@@ -63,7 +63,7 @@ impl Provider {
                 Ok(bytes) => {
                     self.cpu(move || {
                         let text = String::from_utf8(bytes).map_err(|_| {
-                            Error::new("provider_protocol", "OpenAI returned invalid UTF-8")
+                            Error::new("provider_protocol", "provider returned invalid UTF-8")
                         })?;
                         Ok(json!({"text":text, "response_format":format}))
                     })

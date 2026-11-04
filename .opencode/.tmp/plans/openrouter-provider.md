@@ -48,7 +48,7 @@ and https://openrouter.ai/docs/llms.txt (Responses, embeddings, STT, alpha Decis
 ## Tasks and commits
 
 - [x] 1. Save plan on feature branch. Commit: Record OpenRouter provider implementation plan.
-- [ ] 2. Provider enum/config, credential isolation, URL/header routing and neutral
+- [x] 2. Provider enum/config, credential isolation, URL/header routing and neutral
   diagnostics. Add configuration/local HTTP regression checks. Commit: Add
   provider-aware configuration and HTTP requests.
 - [ ] 3. Native generation restrictions, Decisions/media validation, embedding
@@ -97,3 +97,13 @@ usage; never log credentials. Missing credentials skip, invalid credentials fail
 - Clean working tree verified, origin is thomasquintana/llm-mcp, plan directory
   exists and .env is ignored. Feature branch created; no credentials read.
 - Next: task 2, provider configuration/shared HTTP handling.
+
+### Task 2
+- Added ServiceProvider/config selection and selected-key/base URL handling;
+  reject OpenRouter OAuth, isolate OpenAI headers, route alpha Decisions on the
+  configured origin. Shared errors now use provider-neutral diagnostics.
+- Added configuration and native HTTP regression suites, including credential
+  isolation, unknown-field preservation and body-free rate-limit errors.
+- Passed `cargo fmt --all` and `cargo test --locked --test configuration --test
+  openrouter --test provider --lib`: 38 tests passed.
+- Next: task 3, native tool contracts and media/multipart validation.
