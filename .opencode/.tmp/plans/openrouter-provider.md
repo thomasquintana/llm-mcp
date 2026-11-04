@@ -58,7 +58,7 @@ and https://openrouter.ai/docs/llms.txt (Responses, embeddings, STT, alpha Decis
 - [x] 4. Provider-aware tool schemas, runtime discovery, CLI exports, explicit
   catalog generation and OpenRouter HTLK examples; identity and transport checks.
   Commit: Export provider-specific MCP tools and catalogs.
-- [ ] 5. OpenRouter credential gate, isolated server process settings, native
+- [x] 5. OpenRouter credential gate, isolated server process settings, native
   Decisions and meaningful checks for all tools over stdio/HTTP; model overrides,
   explicit missing-key skips and invalid-key/provider failures. Run mock harness
   tests and live tests with available .env credentials. Commit: Exercise
@@ -128,3 +128,17 @@ usage; never log credentials. Missing credentials skip, invalid credentials fail
 - Passed fmt, identity + independent transport suites (10 tests, discovery covers
   both providers), and catalog regeneration/drift checks.
 - Next: task 5, isolated OpenRouter live suites and credentials from .env.
+
+### Task 5
+- Added OpenRouter credential gate and model overrides, native classification
+  semantic checks, shared process isolation and real function-call continuation.
+  Mock driver checks both providers over both transports and rejects invalid keys.
+- Initial live checks found typesafe/jev-latest nonexistent; typesafe/jev-1.14
+  works. Jev rejects the original rectangular PNG dimensions; generated a 512x512
+  version of the same synthetic image (existing fixtures unchanged). Native state
+  text is plain strings, not Chat Completions text parts.
+- Passed live OpenRouter suite with .env key: 18 checks across stdio and HTTP,
+  including discovery, text/image generation, text/image native Decisions,
+  text/image-prepared embeddings, audio transcription and function continuation.
+- Passed offline harness (10 tests) and live-suite --list (three suites).
+- Next: task 6, complete docs and final repository gates.

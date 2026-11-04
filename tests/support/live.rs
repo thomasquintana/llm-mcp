@@ -10,6 +10,7 @@ use tokio::{
 };
 
 pub const OPENAI: &str = "https://api.openai.com/v1/";
+pub const OPENROUTER: &str = "https://openrouter.ai/api/v1/";
 const MAX_RESPONSE: usize = 2 * 1024 * 1024;
 
 pub type Result<T> = std::result::Result<T, Failure>;
@@ -31,6 +32,7 @@ impl std::fmt::Display for Failure {
 
 pub enum Credential {
     ApiKey(String),
+    OpenRouter(String),
     OAuth(PathBuf),
 }
 
@@ -38,7 +40,24 @@ impl Credential {
     pub fn mode(&self) -> &'static str {
         match self {
             Self::ApiKey(_) => "api_key",
+            Self::OpenRouter(_) => "api_key",
             Self::OAuth(_) => "oauth",
+        }
+    }
+
+    pub fn provider(&self) -> &'static str {
+        if matches!(self, Self::OpenRouter(_)) {
+            "openrouter"
+        } else {
+            "openai"
+        }
+    }
+
+    pub fn endpoint(&self) -> &'static str {
+        if matches!(self, Self::OpenRouter(_)) {
+            OPENROUTER
+        } else {
+            OPENAI
         }
     }
 }
@@ -47,6 +66,12 @@ pub fn api_key(get: impl Fn(&str) -> Option<String>) -> Option<Credential> {
     get("OPENAI_API_KEY")
         .filter(|s| !s.is_empty())
         .map(Credential::ApiKey)
+}
+
+pub fn openrouter_key(get: impl Fn(&str) -> Option<String>) -> Option<Credential> {
+    get("OPENROUTER_API_KEY")
+        .filter(|s| !s.is_empty())
+        .map(Credential::OpenRouter)
 }
 
 pub fn oauth(get: impl Fn(&str) -> Option<String>) -> Result<Option<Credential>> {
@@ -94,7 +119,16 @@ fn environment(
 ) -> HashMap<String, String> {
     let mut env = HashMap::from([
         ("LLM_MCP_AUTH".into(), credential.mode().into()),
-        ("OPENAI_BASE_URL".into(), endpoint.into()),
+        ("LLM_MCP_PROVIDER".into(), credential.provider().into()),
+        (
+            if matches!(credential, Credential::OpenRouter(_)) {
+                "OPENROUTER_BASE_URL"
+            } else {
+                "OPENAI_BASE_URL"
+            }
+            .into(),
+            endpoint.into(),
+        ),
         ("LLM_MCP_TIMEOUT_MS".into(), timeout.as_millis().to_string()),
         ("LLM_MCP_MAX_CONCURRENCY".into(), "1".into()),
         ("RUST_LOG".into(), "off".into()),
@@ -102,6 +136,9 @@ fn environment(
     match credential {
         Credential::ApiKey(key) => {
             env.insert("OPENAI_API_KEY".into(), key.clone());
+        }
+        Credential::OpenRouter(key) => {
+            env.insert("OPENROUTER_API_KEY".into(), key.clone());
         }
         Credential::OAuth(path) => {
             env.insert(
@@ -124,12 +161,17 @@ pub fn command(
     // the other authentication mode. In particular, do not inherit a mock URL.
     for (key, _) in std::env::vars_os() {
         let name = key.to_string_lossy();
-        if name.starts_with("LLM_MCP_") || name.starts_with("OPENAI_") || name == "RUST_LOG" {
+        if name.starts_with("LLM_MCP_")
+            || name.starts_with("OPENAI_")
+            || name.starts_with("OPENROUTER_")
+            || name == "RUST_LOG"
+        {
             command.env_remove(key);
         }
     }
     command
         .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
         .env_remove("LLM_MCP_OAUTH_CREDENTIALS_PATH");
     command
         .arg("serve")
