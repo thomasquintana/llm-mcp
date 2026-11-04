@@ -1,6 +1,6 @@
 # llm-mcp
 
-A Rust MCP server exposing OpenAI through **`generate`**, **`classify`**, **`embed`**,
+A Rust MCP server exposing OpenAI and OpenRouter through **`generate`**, **`classify`**, **`embed`**,
 and **`transcribe`**. Designed for HTLK, standalone containers, and Kubernetes.
 
 ## Install and run
@@ -23,6 +23,20 @@ The HTTP endpoint is `/mcp`, with `/health/live` and `/health/ready` probes. Use
 `llm-mcp --help` for CLI commands. Configuration is environment-only; see the
 [complete variable reference](docs/configuration.md).
 
+### OpenRouter
+
+Supply `OPENROUTER_API_KEY`, then select the provider per server:
+
+```sh
+LLM_MCP_PROVIDER=openrouter llm-mcp serve
+```
+
+All four tools are available. Use OpenRouter model IDs, such as
+`openai/gpt-4.1-mini`. OpenRouter `classify` uses its native alpha Decisions
+`state` and named `questions` object; transcription supports `json` and
+`verbose_json`. See [OpenRouter examples and provider differences](docs/openrouter.md).
+OpenAI remains the default. ChatGPT OAuth is OpenAI-only.
+
 ## Tools
 
 Models and provider options are caller-selected. Generation/classification preserve
@@ -35,6 +49,9 @@ pipeline, and transcription converts base64 audio into a multipart upload.
 | `classify` | Enabled | Disabled | Decisions, with text/base64 image input |
 | `embed` | Enabled | Disabled | Text/token embeddings, optionally from image descriptions |
 | `transcribe` | Enabled | Disabled | Audio transcription from base64 bytes |
+
+The examples below use OpenAI model IDs and its classification/transcription
+formats. For OpenRouter, use the [provider-specific examples](docs/openrouter.md).
 
 Example `generate` arguments:
 
@@ -177,13 +194,13 @@ access; see [login, refresh and remote deployment](docs/oauth.md).
 - [HTLK catalogs and function continuation](docs/htlk.md)
 - [Specification](docs/specification.md)
 - [Development checks](CONTRIBUTING.md)
-- [Credential-gated live OpenAI E2E tests](docs/testing.md)
+- [Credential-gated live OpenAI/OpenRouter E2E tests](docs/testing.md)
 - [Publishing and binary/container releases](docs/releases.md)
 - [Acceptance evidence and verification boundaries](docs/verification.md)
 
 MCP protocol compatibility is pinned to **2025-11-25** for HTLK. Export descriptors
 using `llm-mcp catalog`, or HTLK inputs using `llm-mcp catalog --htlk`. Exports reflect
-`LLM_MCP_AUTH` and require no credentials.
+`LLM_MCP_PROVIDER` and `LLM_MCP_AUTH` and require no credentials.
 
 ## License
 

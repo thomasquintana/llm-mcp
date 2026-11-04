@@ -1,5 +1,46 @@
 # v0.1 acceptance evidence
 
+## OpenRouter provider update — 2026-11-04
+
+Verified on macOS ARM64 with Rust **1.98.0**:
+
+- **77 deterministic Rust regressions** pass, including native OpenRouter HTTP
+  routing, key/header isolation, payload preservation, classification media/assets,
+  request/response bounds, multipart JSON options, image-description embeddings,
+  provider-aware discovery and independent stdio/HTTP process checks.
+- The real OpenRouter API-key suite passes **18 checks** over stdio and HTTP:
+  discovery, text/image generation, text/image native alpha Decisions, text and
+  image-description embeddings, spoken-audio transcription and caller-executed
+  function continuation. Models used were `openai/gpt-4.1-mini`,
+  `typesafe/jev-1.14`, `openai/text-embedding-3-small` and
+  `openai/whisper-large-v3`. Credentials were loaded from ignored `.env` only for
+  this explicit live run.
+- Live verification found the bare `typesafe/jev-latest` model ID unavailable and
+  the original 480×260 image rejected by Jev. Tests now use a reproducible 512×512
+  version of the same shapes and `typesafe/jev-1.14`.
+- The ordinary full test run also passes **12 real OpenAI OAuth checks** over both
+  transports. OpenAI API-key access was absent from that process and explicitly
+  skipped; its live API-key suite was not executed in this update.
+- Formatting, all-target/all-feature Clippy with warnings denied, warnings-denied
+  rustdoc, dependency policy, generated notices and six provider/auth/transport
+  catalog drift checks pass. Dependency policy reports existing duplicate-version
+  and unused-license-allowance warnings; no dependencies or exceptions were added.
+- **12 Python tooling tests** and Ruff pass. Production LLVM line coverage is
+  **88.67%**, measured with all live credentials explicitly unavailable; all three
+  live suites report skips in that run. The native OpenRouter validation module
+  reaches **98.44%** line coverage.
+- Cargo packaging succeeds with independent compilation in a fresh target
+  directory. Real sibling HTLK default-provider workflows and continuation checks
+  pass over both transports against local providers.
+- Both Compose configurations validate, and containerized kubeconform **0.7.0**
+  validates all six Kubernetes resources. Building the current Docker image was
+  blocked by a timeout fetching the pinned Dockerfile frontend; a legacy-builder
+  fallback also timed out. Consequently the current image's container smoke test
+  was not executed. Existing deployment manifests and Dockerfile are unchanged.
+
+Provider-specific contracts, native alpha classification and usage/model overrides
+are documented in [OpenRouter](openrouter.md) and [testing](testing.md).
+
 ## Automatic live-provider E2E update — 2026-10-28
 
 - An ordinary `cargo test --all-features --locked` run passed **66 deterministic

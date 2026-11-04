@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Add per-server OpenRouter selection with isolated credentials, native Responses/alpha Decisions/embeddings/transcription, provider-specific MCP catalogs and credential-gated live verification over both transports.
+
 - Automatically run real OpenAI E2E tests over stdio and HTTP when an API key or stored OAuth credentials are available, with independent gates, visible skips, semantic media checks and isolated authentication.
 
 - Add base64-only `transcribe` with bounded multipart uploads, native transcription options and complete JSON/diarization or text/subtitle results.

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     version,
-    about = "OpenAI generation, decisions, embeddings and transcription over MCP"
+    about = "OpenAI and OpenRouter generation, decisions, embeddings and transcription over MCP"
 )]
 struct Cli {
     #[command(subcommand)]

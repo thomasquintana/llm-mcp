@@ -8,12 +8,20 @@ llm-mcp catalog --htlk --transport stdio
 llm-mcp catalog --htlk --transport streamable_http
 ```
 
-The exporter requires no credentials and selects tools using `LLM_MCP_AUTH`.
+The exporter requires no credentials and selects tools using `LLM_MCP_PROVIDER`
+and `LLM_MCP_AUTH`.
 `examples/htlk/workflow.htlk` exercises all four API-key-mode tools. Adjacent
 `requests.json` includes mixed text/base64 images, batched classification,
 contextual image embedding and base64 transcription. Its tiny media fixtures
 demonstrate encoding; replace them with your own content for useful live results.
 Model availability depends on provider access.
+
+For OpenRouter, export with `LLM_MCP_PROVIDER=openrouter` or use the checked-in
+`stdio.openrouter.catalogs.json` / `streamable_http.openrouter.catalogs.json`.
+Set the same provider on the actual server and supply `OPENROUTER_API_KEY`.
+Adapt request model IDs and native classification fields (`state` plus a named
+questions object), and use json/verbose_json transcription. The adjacent default
+workflow requests use OpenAI's contract; see [OpenRouter examples](openrouter.md).
 
 For OAuth, use `LLM_MCP_AUTH=oauth llm-mcp catalog --htlk`, the checked-in
 `*.oauth.catalogs.json` files, and `oauth.htlk` with `oauth.requests.json`.
@@ -41,6 +49,7 @@ follow-up graph; `examples/htlk/continuation.htlk` demonstrates the follow-up.
 llm-mcp never executes returned functions. OAuth uses full input
 history rather than `previous_response_id` and has provider-specific function-tool
 requirements. See [OAuth](oauth.md).
+OpenRouter also requires full input history rather than previous_response_id.
 
 HTLK requires object-root input/output schemas and `structuredContent`. Our output
 schema preserves arbitrary provider object fields. HTLK ignores the compatibility

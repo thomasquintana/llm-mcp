@@ -63,7 +63,7 @@ and https://openrouter.ai/docs/llms.txt (Responses, embeddings, STT, alpha Decis
   explicit missing-key skips and invalid-key/provider failures. Run mock harness
   tests and live tests with available .env credentials. Commit: Exercise
   OpenRouter through credential-gated MCP end-to-end tests.
-- [ ] 6. README/config/spec/media/OAuth/testing/deployment/HTLK docs, package/CLI
+- [x] 6. README/config/spec/media/OAuth/testing/deployment/HTLK docs, package/CLI
   descriptions and Unreleased changelog. Run all required checks below. Record
   results/limitations. Commit: Document OpenRouter configuration and verification.
 - [ ] 7. Review full branch/commits, remove plan, commit cleanup, push and open PR.
@@ -142,3 +142,21 @@ usage; never log credentials. Missing credentials skip, invalid credentials fail
   text/image-prepared embeddings, audio transcription and function continuation.
 - Passed offline harness (10 tests) and live-suite --list (three suites).
 - Next: task 6, complete docs and final repository gates.
+
+### Task 6
+- Updated README, package/CLI identity, Unreleased changelog and configuration,
+  specification, media, OAuth, testing, deployment/HTLK docs; added detailed native
+  OpenRouter examples and recorded actual execution in docs/verification.md.
+- Passed fmt, clippy all-targets/all-features -D warnings, full cargo test (77
+  deterministic tests plus 12 real OpenAI OAuth checks), warnings-denied rustdoc,
+  cargo deny, notices, all six catalogs, Ruff and 12 Python tests.
+- Coverage passed credential-free: 88.67% production lines, OpenRouter validator
+  98.44%. Packaging independently rebuilt in fresh target directory
+  /var/folders/gb/g744mwgj3nn6mtf4dgdg58p00000gn/T/opencode/openrouter-package.vWilAu.
+- Real sibling HTLK default-provider workflows/continuation pass both transports.
+  Both Compose configs pass; cached kubeconform 0.7.0 container validates six K8s
+  resources. Docker build blocked fetching pinned frontend (240s timeout); legacy
+  fallback also timed out. Current-image smoke remains an environmental limitation,
+  recorded in permanent verification docs and to be included in PR.
+- GitHub authentication verified; default PR base is main.
+- Next: task 7, review all commits, clean plan, push and open PR.

@@ -14,8 +14,9 @@ cargo package --locked --allow-dirty
 ```
 
 Use a fresh `CARGO_TARGET_DIR` for final packaging checks. Tests support runs without
-provider credentials. Real OpenAI E2E suites run automatically when an API key or
-stored OAuth credentials are available; missing credentials produce explicit skips.
+provider credentials. Real OpenAI/OpenRouter E2E suites run automatically when the
+corresponding API key or stored OpenAI OAuth credentials are available; missing
+credentials produce explicit skips.
 Present-but-invalid credentials and provider failures fail the suite. See
 [live-provider testing](docs/testing.md) for gates, model overrides and filters.
 Keep credentials and runtime authentication state out of source control.

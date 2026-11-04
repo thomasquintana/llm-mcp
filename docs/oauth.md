@@ -1,5 +1,9 @@
 # OpenAI authentication
 
+This page applies to `LLM_MCP_PROVIDER=openai` (the default). OpenRouter requires
+`OPENROUTER_API_KEY` and `LLM_MCP_AUTH=api_key`; ChatGPT login/logout/auth commands
+and OAuth mode are rejected when OpenRouter is selected. See [OpenRouter](openrouter.md).
+
 Select server-wide `LLM_MCP_AUTH=api_key` (default) or `oauth`. API-key mode requires
 `OPENAI_API_KEY` and never opens stored OAuth credentials. OAuth mode enables only
 `generate` and rejects a simultaneously supplied `OPENAI_API_KEY`. Classification,

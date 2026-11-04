@@ -1,8 +1,11 @@
 # Specification — v0.1
 
-`generate` forwards provider-compatible OpenAI Responses requests. `classify`
+Select OpenAI (default) or OpenRouter per instance using `LLM_MCP_PROVIDER`.
+`generate` forwards provider-compatible Responses requests. `classify`
 forwards OpenAI Decisions requests with shared evidence and named predicate,
-choice, and score questions. Requests and responses retain unknown provider
+choice, and score questions, or native OpenRouter alpha Decisions using `state`
+and a named `questions` object (`noul`, `choice`, `score`, `box`). Native answers
+are preserved without translation. Requests and responses retain unknown provider
 fields. Credentials, base URL and transport settings are environment configuration,
 not tool arguments. Conversations are supplied by callers; the server stores no
 conversation history and executes no returned function calls.
@@ -12,8 +15,11 @@ be nonempty base64 data URLs with supported image MIME types; remote URLs and im
 file references are rejected before dispatch. The same rule covers supported tool
 outputs and classification question instructions. Unrelated JSON is not scanned as
 media. Encoded request and aggregate decoded-media bytes are bounded.
+OpenRouter classification instead validates native `image_url` parts and base64
+PNG/JPEG assets within state and question guidance, rejecting audio/video/file
+parts and remote image URLs. Provider/model image placement and size limits apply.
 
-`embed` accepts standard OpenAI text/token `input` or a mutually exclusive `inputs`
+`embed` accepts standard text/token `input` or a mutually exclusive `inputs`
 batch of `{content:[input_text/input_image parts]}`. Image-bearing items require
 `description.model` with optional `description.instructions`. All images within an
 item are described together; original text context plus the detailed description
@@ -24,7 +30,7 @@ The consistent result envelope is `{response: <full embedding response>,
 prepared_inputs: [...]}`. Prepared items retain index and exact text; image items
 also retain description, description_model and returned description_usage. Standard
 text/token requests return an empty prepared_inputs array. Both stages use API keys
-and share one deadline and concurrency permit.
+and share one deadline and concurrency permit on the selected provider.
 
 `transcribe` requires a caller-selected model and
 `file:{filename,mime_type,data_base64}`. The file contains canonical base64 bytes,
@@ -32,10 +38,13 @@ not a URL or path; the server uploads decoded bytes to `/audio/transcriptions` a
 multipart data with the supplied filename and MIME type. Known-speaker references
 must be supported base64 audio data URLs. Scalar options become text fields, scalar
 arrays use repeated `name[]` fields, and nested objects use bracketed field names.
-Provider-specific model/option compatibility is validated by OpenAI. Omitted
+Provider-specific model/option compatibility is validated upstream. Omitted
 response_format defaults to json. Complete json, verbose_json and diarized_json
 objects are preserved; text, srt and vtt return `{text, response_format}` with exact
 UTF-8 content. Multipart overhead counts against the request byte limit.
+OpenRouter transcription accepts only json/verbose_json and JSON-encodes native
+provider/trace objects as single multipart fields. Alternate source_url/input_audio
+sources are rejected. See [provider contracts and examples](openrouter.md).
 
 MCP arguments and structured results are JSON objects. All four tools publish stable
 input/output schemas. Successful structuredContent preserves full provider objects,
@@ -47,6 +56,10 @@ OAuth generation internally uses OpenAI-required SSE and store:false, and observ
 OAuth-specific parameter limitations. Explicit auth chooses ChatGPT OAuth or an
 API key for the entire server. OAuth enables only generation; all other tools are
 disabled. OAuth and a configured API key conflict. No automatic fallback.
+OAuth is OpenAI-only; OpenRouter requires its own API key. Unselected providers'
+keys/settings are ignored. OpenRouter Responses rejects store:true and non-null
+previous_response_id; callers provide full context. Catalogs reflect both provider
+and authentication selection without opening credential state.
 
 Application settings come only from environment variables. OAuth registration,
 host identity and rotating tokens persist separately in protected files. Login,
