@@ -1,7 +1,7 @@
 //! Independent JSON-RPC wire tests, without RMCP's client implementation.
 
 use llm_mcp::{
-    config::{AuthMode, Config},
+    config::{AuthMode, Config, ServiceProvider},
     mcp, runtime,
 };
 use serde_json::{Value, json};
@@ -44,11 +44,27 @@ async fn decode_http(response: reqwest::Response) -> Value {
 
 #[tokio::test]
 async fn stdio_initializes_lists_calls_without_stdout_noise() {
+    for provider in [ServiceProvider::OpenAI, ServiceProvider::OpenRouter] {
+        stdio_discovery(provider).await;
+    }
+}
+
+async fn stdio_discovery(provider: ServiceProvider) {
     let mut child = stdio_command()
         .arg("serve")
         .env("LLM_MCP_TRANSPORT", "stdio")
+        .env(
+            "LLM_MCP_PROVIDER",
+            if provider == ServiceProvider::OpenRouter {
+                "openrouter"
+            } else {
+                "openai"
+            },
+        )
         .env("OPENAI_API_KEY", "test")
+        .env("OPENROUTER_API_KEY", "test")
         .env("OPENAI_BASE_URL", "http://127.0.0.1:1/v1/")
+        .env("OPENROUTER_BASE_URL", "http://127.0.0.1:1/api/v1/")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -94,7 +110,7 @@ async fn stdio_initializes_lists_calls_without_stdout_noise() {
         if response["id"] == 2 {
             assert_eq!(
                 response["result"]["tools"],
-                serde_json::to_value(mcp::tools(AuthMode::ApiKey)).unwrap()
+                serde_json::to_value(mcp::tools_for(provider, AuthMode::ApiKey)).unwrap()
             );
             found += 1;
         }
@@ -300,11 +316,25 @@ async fn http_cancellation_releases_provider_capacity() {
 
 #[tokio::test]
 async fn http_session_health_calls_and_shutdown() {
+    for provider in [ServiceProvider::OpenAI, ServiceProvider::OpenRouter] {
+        http_discovery(provider).await;
+    }
+}
+
+async fn http_discovery(provider: ServiceProvider) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let config = Config::from_lookup(|k| match k {
-        "OPENAI_API_KEY" => Some("test".into()),
-        "OPENAI_BASE_URL" => Some("http://127.0.0.1:1/v1/".into()),
+        "LLM_MCP_PROVIDER" => Some(
+            if provider == ServiceProvider::OpenRouter {
+                "openrouter"
+            } else {
+                "openai"
+            }
+            .into(),
+        ),
+        "OPENAI_API_KEY" | "OPENROUTER_API_KEY" => Some("test".into()),
+        "OPENAI_BASE_URL" | "OPENROUTER_BASE_URL" => Some("http://127.0.0.1:1/v1/".into()),
         _ => None,
     })
     .unwrap();
@@ -376,7 +406,7 @@ async fn http_session_health_calls_and_shutdown() {
     .await;
     assert_eq!(
         response["result"]["tools"],
-        serde_json::to_value(mcp::tools(AuthMode::ApiKey)).unwrap()
+        serde_json::to_value(mcp::tools_for(provider, AuthMode::ApiKey)).unwrap()
     );
     let response=decode_http(post(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"classify","arguments":{"stream":true}}})).send().await.unwrap()).await;
     assert_eq!(response["result"]["isError"], true);

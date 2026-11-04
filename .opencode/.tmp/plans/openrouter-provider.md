@@ -55,7 +55,7 @@ and https://openrouter.ai/docs/llms.txt (Responses, embeddings, STT, alpha Decis
   pipeline and transcription formats/encoding. Local contracts and execution
   bounds regression coverage. Commit: Support OpenRouter generation decisions
   embeddings and transcription.
-- [ ] 4. Provider-aware tool schemas, runtime discovery, CLI exports, explicit
+- [x] 4. Provider-aware tool schemas, runtime discovery, CLI exports, explicit
   catalog generation and OpenRouter HTLK examples; identity and transport checks.
   Commit: Export provider-specific MCP tools and catalogs.
 - [ ] 5. OpenRouter credential gate, isolated server process settings, native
@@ -118,3 +118,13 @@ usage; never log credentials. Missing credentials skip, invalid credentials fail
 - Passed fmt and targeted lib/provider/openrouter/embed/transcribe suites (54
   tests); added a direct aggregate image/asset budget regression (55 total).
 - Next: task 4, provider-specific descriptors and catalogs.
+
+### Task 4
+- Added tools_for/catalog_for/htlk_catalog_for, retaining OpenAI helper APIs.
+  Runtime and CLI exports select provider; native Decisions schema and supported
+  transcription formats are advertised. ChatGPT auth commands reject OpenRouter.
+- Added generated OpenRouter catalogs for stdio/HTTP, with explicit provider
+  selection in generator. Existing OpenAI catalogs remain byte-for-byte stable.
+- Passed fmt, identity + independent transport suites (10 tests, discovery covers
+  both providers), and catalog regeneration/drift checks.
+- Next: task 5, isolated OpenRouter live suites and credentials from .env.

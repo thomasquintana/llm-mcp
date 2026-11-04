@@ -14,10 +14,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    for transport, auth in (
-        (transport, auth)
+    for transport, provider, auth in (
+        (transport, provider, auth)
         for transport in ("stdio", "streamable_http")
-        for auth in ("api_key", "oauth")
+        for provider, auth in (("openai", "api_key"), ("openai", "oauth"), ("openrouter", "api_key"))
     ):
         output = subprocess.check_output(
             [
@@ -33,10 +33,10 @@ def main():
             ],
             cwd=ROOT,
             text=True,
-            env={**os.environ, "LLM_MCP_AUTH": auth},
+            env={**os.environ, "LLM_MCP_PROVIDER": provider, "LLM_MCP_AUTH": auth},
         )
         json.loads(output)
-        suffix = ".oauth" if auth == "oauth" else ""
+        suffix = ".openrouter" if provider == "openrouter" else (".oauth" if auth == "oauth" else "")
         path = ROOT / "examples" / "htlk" / f"{transport}{suffix}.catalogs.json"
         if args.check:
             if path.read_text() != output:
