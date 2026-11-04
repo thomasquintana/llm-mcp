@@ -2,6 +2,7 @@
 
 mod embed;
 mod media;
+mod openrouter;
 mod sse;
 mod transcribe;
 
@@ -23,13 +24,13 @@ use tokio_util::task::{TaskTracker, task_tracker::TaskTrackerToken};
 /// Which provider endpoint handles a tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operation {
-    /// OpenAI Responses.
+    /// Responses generation.
     Generate,
-    /// OpenAI Decisions.
+    /// Provider-native Decisions classification.
     Classify,
-    /// OpenAI text embeddings, optionally prepared from image descriptions.
+    /// Text embeddings, optionally prepared from image descriptions.
     Embed,
-    /// OpenAI audio transcription via a base64-to-multipart upload.
+    /// Audio transcription via a base64-to-multipart upload.
     Transcribe,
 }
 
@@ -189,11 +190,17 @@ impl Provider {
 
     async fn execute(&self, operation: Operation, mut arguments: Value) -> Result<Value> {
         let limit = self.config.max_request_bytes;
+        let provider = self.config.provider;
         arguments = self
             .cpu(move || {
                 validate(&arguments)?;
                 bounded_json(&arguments, limit, true)?;
-                if matches!(operation, Operation::Generate | Operation::Classify) {
+                if provider == ServiceProvider::OpenRouter {
+                    openrouter::validate(operation, &arguments, limit)?;
+                }
+                if operation == Operation::Generate
+                    || (operation == Operation::Classify && provider == ServiceProvider::OpenAI)
+                {
                     media::validate_images(&arguments, limit)?;
                 }
                 Ok(arguments)

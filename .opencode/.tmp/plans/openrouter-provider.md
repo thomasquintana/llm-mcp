@@ -51,7 +51,7 @@ and https://openrouter.ai/docs/llms.txt (Responses, embeddings, STT, alpha Decis
 - [x] 2. Provider enum/config, credential isolation, URL/header routing and neutral
   diagnostics. Add configuration/local HTTP regression checks. Commit: Add
   provider-aware configuration and HTTP requests.
-- [ ] 3. Native generation restrictions, Decisions/media validation, embedding
+- [x] 3. Native generation restrictions, Decisions/media validation, embedding
   pipeline and transcription formats/encoding. Local contracts and execution
   bounds regression coverage. Commit: Support OpenRouter generation decisions
   embeddings and transcription.
@@ -107,3 +107,14 @@ usage; never log credentials. Missing credentials skip, invalid credentials fail
 - Passed `cargo fmt --all` and `cargo test --locked --test configuration --test
   openrouter --test provider --lib`: 38 tests passed.
 - Next: task 3, native tool contracts and media/multipart validation.
+
+### Task 3
+- Added native Decisions structural validation and shared decoded-media budget
+  across state, question guidance and image assets; unsupported media fail before
+  network dispatch. Native request/response fields remain intact.
+- OpenRouter Responses restrictions enforced; image-description embedding pipeline
+  verified on selected provider; transcription supports json/verbose_json and
+  JSON multipart provider/trace options, rejecting alternate remote audio sources.
+- Passed fmt and targeted lib/provider/openrouter/embed/transcribe suites (54
+  tests); added a direct aggregate image/asset budget regression (55 total).
+- Next: task 4, provider-specific descriptors and catalogs.
