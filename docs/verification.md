@@ -1,5 +1,23 @@
 # v0.1 acceptance evidence
 
+## OpenRouter CI repair verification
+
+All seven jobs pass in [CI run 41953459099](https://github.com/thomasquintana/llm-mcp/actions/runs/41953459099)
+for repair commit `d89cda0`: Rust checks on Linux, macOS and native Windows, MSRV,
+policy (including clean packaging and workflow analysis), deployment/container
+smoke tests, and coverage.
+
+- CI explicitly enables cargo-about 0.9.2's `cli` feature; a fresh local install
+  also produced the executable and passed notice generation/comparison.
+- OAuth live-test discovery validates directory ancestors before interpreting
+  missing files. A credential path beneath a regular file fails on Windows rather
+  than being silently skipped. Missing nested directories still skip without
+  creating filesystem state; diagnostics exclude credential paths.
+- The original regression remains active on every platform. Local formatting,
+  Clippy with warnings denied, 77 deterministic Rust tests, warnings-denied rustdoc,
+  fresh-target packaging, catalogs, Ruff, 12 Python tests and actionlint pass.
+  Live-provider requests were not repeated for these CI/test-harness-only fixes.
+
 ## OpenRouter provider update — 2026-11-04
 
 Verified on macOS ARM64 with Rust **1.98.0**:
