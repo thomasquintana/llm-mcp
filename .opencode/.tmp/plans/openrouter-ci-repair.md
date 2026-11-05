@@ -21,7 +21,7 @@ coverage. Update permanent verification evidence to reflect CI deployment succes
 ## Tasks
 
 - [x] 1. Confirm clean branch and job failures; save and commit plan.
-- [ ] 2. Enable cargo-about cli in workflow and contributor instructions. Validate
+- [x] 2. Enable cargo-about cli in workflow and contributor instructions. Validate
   OAuth credential ancestors portably, retaining fail-vs-skip behavior and adding
   missing nested-path/deep invalid-path coverage. Run targeted tests, formatting,
   Clippy, full deterministic tests, rustdoc, notice/catalog/Python checks, workflow
@@ -36,3 +36,17 @@ coverage. Update permanent verification evidence to reflect CI deployment succes
 Task 1: branch clean at b2f5e42, tracking origin/feat/openrouter-provider. Inspected
 failed logs and current source. Both failures match diagnosis above. No changes
 to credentials or application provider behavior are needed.
+
+Task 2: added --features cli to the pinned cargo-about install and contributor
+instructions. OAuth gate checks nearest existing directory ancestor before
+classifying NotFound as absent; original Windows regression retained, plus nested
+missing-path/non-directory ancestor and path-redaction checks. Changelog updated;
+permanent verification now records successful initial CI deployment smoke tests.
+
+Passed formatting, all-target/all-feature Clippy -D warnings, full credential-free
+test suite (77 deterministic tests, three explicit live skips), warnings-denied
+rustdoc, six catalog checks, Ruff, 12 Python tests and actionlint 1.7.12. Installed
+cargo-about 0.9.2 --features cli --locked into a fresh temporary root, verified its
+executable and successfully ran the notices check using that executable. Fresh
+target packaging independently compiled successfully. Next: push and inspect CI;
+native Windows execution is verified by its CI job, not this macOS host.

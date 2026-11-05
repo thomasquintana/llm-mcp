@@ -35,8 +35,9 @@ Verified on macOS ARM64 with Rust **1.98.0**:
 - Both Compose configurations validate, and containerized kubeconform **0.7.0**
   validates all six Kubernetes resources. Building the current Docker image was
   blocked by a timeout fetching the pinned Dockerfile frontend; a legacy-builder
-  fallback also timed out. Consequently the current image's container smoke test
-  was not executed. Existing deployment manifests and Dockerfile are unchanged.
+  fallback also timed out. The subsequent [CI deployment job](https://github.com/thomasquintana/llm-mcp/actions/runs/41887225966/job/126774820934)
+  successfully built the image and passed container smoke tests, resolving this
+  local verification limitation. Existing deployment manifests and Dockerfile are unchanged.
 
 Provider-specific contracts, native alpha classification and usage/model overrides
 are documented in [OpenRouter](openrouter.md) and [testing](testing.md).

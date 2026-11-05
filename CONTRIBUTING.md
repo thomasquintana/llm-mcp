@@ -33,6 +33,7 @@ cargo llvm-cov --all-features --locked --lcov --output-path target/lcov.info --f
 ```
 
 Install cargo-deny 0.20.2, cargo-about 0.9.2 and cargo-llvm-cov 0.9.1 with `--locked`.
+Enable cargo-about's CLI explicitly: `cargo install cargo-about --version 0.9.2 --features cli --locked`.
 Use Python >= 3.11 and uv for tooling. Validate workflow files with actionlint 1.7.12.
 When Cargo.lock changes, regenerate notices:
 

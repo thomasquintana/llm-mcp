@@ -80,6 +80,24 @@ pub fn oauth(get: impl Fn(&str) -> Option<String>) -> Result<Option<Credential>>
         _ => None,
     })
     .map_err(|_| Failure::new("cannot resolve OAuth credential path"))?;
+    // Windows can report NotFound for a child of a regular file. Validate the
+    // nearest existing ancestor before treating absent credentials as a skip.
+    for ancestor in config
+        .credentials_path
+        .ancestors()
+        .skip(1)
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        match std::fs::metadata(ancestor) {
+            Ok(metadata) if metadata.is_dir() => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            _ => {
+                return Err(Failure::new(
+                    "cannot inspect configured OAuth credential directory",
+                ));
+            }
+        }
+    }
     for path in [
         &config.credentials_path,
         &config.credentials_path.with_extension("pending.json"),

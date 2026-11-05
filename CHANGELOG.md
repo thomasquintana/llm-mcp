@@ -4,6 +4,8 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Fix Windows live-test credential discovery so a non-directory ancestor fails instead of skipping, and explicitly enable cargo-about's CLI in CI.
+
 - Add per-server OpenRouter selection with isolated credentials, native Responses/alpha Decisions/embeddings/transcription, provider-specific MCP catalogs and credential-gated live verification over both transports.
 
 - Automatically run real OpenAI E2E tests over stdio and HTTP when an API key or stored OAuth credentials are available, with independent gates, visible skips, semantic media checks and isolated authentication.

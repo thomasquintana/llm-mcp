@@ -29,6 +29,17 @@ fn credential_gates_distinguish_absence_from_present_invalid_state() {
         (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH").then(|| path.to_string_lossy().into_owned())
     };
     assert!(live::oauth(get).unwrap().is_none());
+    let missing = temp.path().join("missing").join("nested").join("auth.json");
+    assert!(
+        live::oauth(|key| (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH")
+            .then(|| missing.to_string_lossy().into_owned()))
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        !missing.parent().unwrap().exists(),
+        "credential discovery must not create directories"
+    );
     std::fs::write(&path, "invalid credential record").unwrap();
     assert!(matches!(
         live::oauth(get).unwrap(),
@@ -49,6 +60,20 @@ fn credential_gates_distinguish_absence_from_present_invalid_state() {
             .to_string_lossy()
             .into_owned()))
         .is_err()
+    );
+    let blocked = path
+        .with_extension("pending.json")
+        .join("missing")
+        .join("nested")
+        .join("auth.json");
+    let error = live::oauth(|key| {
+        (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH").then(|| blocked.to_string_lossy().into_owned())
+    })
+    .err()
+    .expect("a file ancestor must fail even with missing intermediate components");
+    assert!(
+        !error.to_string().contains(&*temp.path().to_string_lossy()),
+        "credential diagnostics must not expose the configured path"
     );
     let default = temp.path().join(".config/llm-mcp");
     std::fs::create_dir_all(&default).unwrap();
