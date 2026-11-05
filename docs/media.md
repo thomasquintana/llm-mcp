@@ -1,12 +1,12 @@
 # Base64 images, embeddings and audio
 
 All image/audio bytes are supplied inline as base64. The server does not download
-media URLs or read caller-provided local file paths. OpenAI validates the decoded
+media URLs or read caller-provided local file paths. The provider validates the decoded
 file format and model compatibility. Models remain caller-selected.
 
 ## Images
 
-Use Responses/Decisions content parts:
+Use Responses and OpenAI Decisions content parts:
 
 ```json
 {"type":"input_image","image_url":"data:image/png;base64,<canonical-base64>"}
@@ -20,13 +20,21 @@ content, function/custom tool-output evidence, computer screenshots and Decision
 question instructions.
 Unrelated JSON and metadata are preserved without interpreting them as media.
 
-`generate` and `classify` use `input_text`/`input_image` parts, not Chat Completions'
+`generate` and OpenAI `classify` use `input_text`/`input_image` parts, not Chat Completions'
 `text`/`image_url` part types. Supply a model that accepts images. OAuth generation
 preserves base64 image input through the internal streaming adapter.
 
+OpenRouter `classify` uses native alpha Decisions state and named questions. Its
+image parts are `{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}`;
+text items in arrays are plain strings. PNG/JPEG assets with raw `data_base64`
+may be referenced by key. State, question instructions/criteria and assets share
+one decoded-byte budget. Remote URLs, multipart asset references and unsupported
+audio/video/file parts are rejected. Image positions and dimensions depend on the
+model/provider. See [native examples](openrouter.md#classification-images).
+
 ## Contextual image embeddings
 
-`embed` accepts either standard OpenAI `input` (a string, string batch, token array,
+`embed` accepts either standard `input` (a string, string batch, token array,
 or token batch) or a nonempty `inputs` batch. These fields are mutually exclusive.
 Each multimodal item has only `content`, an ordered nonempty array of `input_text`
 and/or base64 `input_image` parts. Text-only items must contain nonempty text.
@@ -78,7 +86,7 @@ The result envelope is:
 
 `response` retains the full embedding provider object. Usage in that object is for
 embedding; each image item's `description_usage` is separate and is included when
-returned by OpenAI. Prepared text-only items have only `index` and `text`. Standard
+returned by the provider. Prepared text-only items have only `index` and `text`. Standard
 `input` requests return `prepared_inputs:[]` because no preparation occurred.
 
 ## Audio transcription
@@ -112,19 +120,27 @@ probabilities and unknown fields. `text`, `srt` and `vtt` return
 `{text, response_format}` without altering whitespace or subtitle contents. Format
 support, timestamp options and log probabilities depend on the selected model.
 
+Those six output formats and known-speaker options describe OpenAI. OpenRouter
+supports only `json` and `verbose_json`; `provider` and `trace` must be objects and
+are JSON-encoded into single multipart fields. Alternate `source_url`/`input_audio`
+sources are rejected. Both embedding stages and audio uploads use the selected
+provider's key and endpoints; use that provider's model identifiers.
+
 ## Authentication and resource bounds
 
-`LLM_MCP_AUTH=api_key` enables all four tools and requires `OPENAI_API_KEY`.
+`LLM_MCP_AUTH=api_key` enables all four tools and requires `OPENAI_API_KEY` or
+`OPENROUTER_API_KEY`, according to `LLM_MCP_PROVIDER` (default `openai`).
 `LLM_MCP_AUTH=oauth` enables only `generate` and conflicts with a supplied API key.
 The other tools are omitted from discovery/catalogs and direct calls fail with
 `tool_disabled` before provider activity. Neither authentication fallback nor
 mixed-authentication pipelines are used.
+OAuth is supported only with OpenAI.
 
 `LLM_MCP_MAX_REQUEST_BYTES` bounds encoded arguments, aggregate decoded media and
 each outbound provider request, including transcription multipart overhead.
 Base64 expands bytes by roughly 4/3, so the 8 MiB default argument limit permits
 approximately 6 MiB of raw media, less metadata. Increase it for larger recordings
-within OpenAI's model/upload limits. No automatic audio splitting is performed.
+within the provider's model/upload limits. No automatic audio splitting is performed.
 
 `LLM_MCP_MAX_RESPONSE_BYTES` bounds each provider response and the assembled result,
 including embedding descriptions and text/subtitle wrappers. Oversized preparations

@@ -1,13 +1,17 @@
 //! Command-line entry point for llm-mcp.
 
 use clap::{Parser, Subcommand};
-use llm_mcp::{auth, config::Config, error::Result};
+use llm_mcp::{
+    auth,
+    config::{Config, ServiceProvider},
+    error::{Error, Result},
+};
 use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "OpenAI generation, decisions, embeddings and transcription over MCP"
+    about = "OpenAI and OpenRouter generation, decisions, embeddings and transcription over MCP"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -85,15 +89,21 @@ async fn run(cli: Cli) -> Result<()> {
     let config = Config::from_env()?;
     if let Command::Catalog { htlk, transport } = &command {
         let catalog = if *htlk {
-            llm_mcp::mcp::htlk_catalog(transport, config.auth)
+            llm_mcp::mcp::htlk_catalog_for(transport, config.provider, config.auth)
         } else {
-            llm_mcp::mcp::catalog(config.auth)
+            llm_mcp::mcp::catalog_for(config.provider, config.auth)
         };
         println!(
             "{}",
             serde_json::to_string_pretty(&catalog).expect("static catalog")
         );
         return Ok(());
+    }
+    if config.provider == ServiceProvider::OpenRouter && !matches!(command, Command::Serve) {
+        return Err(Error::new(
+            "configuration",
+            "ChatGPT login/auth commands are OpenAI-only; configure OPENROUTER_API_KEY to serve OpenRouter",
+        ));
     }
     match command {
         Command::Serve => llm_mcp::runtime::serve(config).await,

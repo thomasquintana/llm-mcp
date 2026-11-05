@@ -6,6 +6,7 @@ use std::time::Duration;
 
 pub const API_SUITE: &str = "live_openai_api_key";
 pub const OAUTH_SUITE: &str = "live_openai_oauth";
+pub const OPENROUTER_SUITE: &str = "live_openrouter_api_key";
 const CONTEXT: &str = "Catalog item: shapes-fixture-42.";
 const DIMENSIONS: usize = 64;
 
@@ -102,6 +103,16 @@ impl Case {
 }
 
 pub fn cases(credential: &Credential, get: impl Fn(&str) -> Option<String>) -> Result<Vec<Case>> {
+    if matches!(credential, Credential::OpenRouter(_)) {
+        return openrouter_cases(&get);
+    }
+    openai_cases(credential, get)
+}
+
+fn openai_cases(
+    credential: &Credential,
+    get: impl Fn(&str) -> Option<String>,
+) -> Result<Vec<Case>> {
     let oauth = matches!(credential, Credential::OAuth(_));
     let generate = model(
         &get,
@@ -180,6 +191,122 @@ pub fn cases(credential: &Credential, get: impl Fn(&str) -> Option<String>) -> R
     ],"description":{"model":description,"instructions":"Explicitly include colors, shapes, printed labels and the number."},"dimensions":DIMENSIONS,"encoding_format":"float"}), check:check_image_embeddings, disabled:false });
     cases.push(Case { name:"transcribe_audio", tool:"transcribe", model:transcribe.clone(), arguments:json!({"model":transcribe,"file":{"filename":"shapes.wav","mime_type":"audio/wav","data_base64":include_str!("../fixtures/shapes.wav.base64").trim()},"language":"en","response_format":"json"}), check:check_transcription, disabled:false });
     Ok(cases)
+}
+
+fn openrouter_cases(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<Case>> {
+    let models = [
+        ("GENERATE", "openai/gpt-4.1-mini"),
+        ("CLASSIFY", "typesafe/jev-1.14"),
+        ("EMBED", "openai/text-embedding-3-small"),
+        ("DESCRIPTION", "openai/gpt-4.1-mini"),
+        ("TRANSCRIBE", "openai/whisper-large-v3"),
+    ]
+    .into_iter()
+    .map(|(kind, default)| {
+        Ok((
+            format!("LLM_MCP_E2E_{kind}_MODEL"),
+            model(get, &format!("OPENROUTER_{kind}"), default)?,
+        ))
+    })
+    .collect::<Result<std::collections::HashMap<_, _>>>()?;
+    let mut cases = openai_cases(&Credential::ApiKey(String::new()), |key| {
+        models.get(key).cloned()
+    })?;
+    for (index, expected) in [(2, "left"), (3, "42")] {
+        let state = if index == 2 {
+            json!("A red square is to the left of a blue circle.")
+        } else {
+            json!(["Evaluate the image.",{"type":"image_url","image_url":{"url":format!("data:image/png;base64,{}",include_str!("../fixtures/shapes.square.png.base64").trim())}}])
+        };
+        let instructions = if index == 2 {
+            "Which side of the blue circle is the red square on?"
+        } else {
+            "Which number is printed below the red square?"
+        };
+        let criteria = if index == 2 {
+            json!({"left":"Left of the blue circle","right":"Right of the blue circle"})
+        } else {
+            json!({"42":"The number 42","17":"The number 17"})
+        };
+        cases[index].arguments = json!({"model":cases[index].model,"state":state,"questions":{
+            "red_square":{"type":"noul","instructions":"Does the input describe or show a red square?"},
+            "selection":{"type":"choice","instructions":instructions,"criteria":criteria}
+        }});
+        cases[index].check = if expected == "left" {
+            |v| native_classification(v, "left")
+        } else {
+            |v| native_classification(v, "42")
+        };
+    }
+    Ok(cases)
+}
+
+fn native_classification(value: &Value, expected: &str) -> Result<()> {
+    let answers = value["answers"]
+        .as_object()
+        .ok_or_else(|| Failure::new("native classification lacks named answers"))?;
+    require(
+        answers.len() == 2,
+        "native classification returned wrong answer count",
+    )?;
+    require(
+        value["answers"]["red_square"]["type"] == "noul"
+            && value["answers"]["red_square"]["noul"]
+                .as_f64()
+                .is_some_and(|p| p.is_finite() && (0.8..=1.0).contains(&p)),
+        "native classification did not recognize red square",
+    )?;
+    require(
+        value["answers"]["selection"]["type"] == "choice"
+            && value["answers"]["selection"]["choice"] == expected
+            && value["answers"]["selection"]["probabilities"][expected]
+                .as_f64()
+                .is_some_and(|p| p.is_finite() && (0.5..=1.0).contains(&p)),
+        "native classification chose wrong side/number or lacks probabilities",
+    )
+}
+
+pub async fn function_continuation(server: &mut super::live::Server, model: &str) -> Result<()> {
+    let input = json!([{"role":"user","content":"Call lookup_code, then reply with the exact code it returns."}]);
+    let result = server.call("generate",json!({"model":model,"input":input,"store":false,"tools":[{"type":"function","name":"lookup_code","description":"Look up the code","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"strict":true}],"tool_choice":{"type":"function","name":"lookup_code"}})).await?;
+    let response = structured(&result)?;
+    let call = response["output"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["type"] == "function_call" && item["name"] == "lookup_code")
+        })
+        .ok_or_else(|| Failure::new("generation did not return expected function call"))?;
+    require(
+        call["call_id"].as_str().is_some_and(|s| !s.is_empty()),
+        "function call lacks call_id",
+    )?;
+    require(
+        call["arguments"]
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .is_some_and(|v| v.is_object()),
+        "function call arguments are not JSON",
+    )?;
+    let mut history = input.as_array().expect("static history").clone();
+    history.extend(
+        response["output"]
+            .as_array()
+            .expect("validated output")
+            .iter()
+            .cloned(),
+    );
+    history.push(
+        json!({"type":"function_call_output","call_id":call["call_id"],"output":"AMBER-7392"}),
+    );
+    let result = server
+        .call(
+            "generate",
+            json!({"model":model,"input":history,"store":false}),
+        )
+        .await?;
+    words(&generated(structured(&result)?)?, &["amber", "7392"])
 }
 
 fn model(get: &impl Fn(&str) -> Option<String>, kind: &str, default: &str) -> Result<String> {

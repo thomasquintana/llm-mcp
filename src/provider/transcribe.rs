@@ -5,7 +5,10 @@ use super::{
     media::{self, Budget},
     read_bounded,
 };
-use crate::error::{Error, Result};
+use crate::{
+    config::ServiceProvider,
+    error::{Error, Result},
+};
 use reqwest::{
     header,
     multipart::{Form, Part},
@@ -36,7 +39,10 @@ const EXTENSIONS: &[&str] = &[
 impl Provider {
     pub(super) async fn transcribe(&self, arguments: Value) -> Result<Value> {
         let limit = self.config.max_request_bytes;
-        let (form, format) = self.cpu(move || prepare(arguments, limit)).await??;
+        let provider = self.config.provider;
+        let (form, format) = self
+            .cpu(move || prepare(arguments, limit, provider))
+            .await??;
         let request = self.request("audio/transcriptions", false).await?;
         let request = self
             .cpu(move || {
@@ -63,7 +69,7 @@ impl Provider {
                 Ok(bytes) => {
                     self.cpu(move || {
                         let text = String::from_utf8(bytes).map_err(|_| {
-                            Error::new("provider_protocol", "OpenAI returned invalid UTF-8")
+                            Error::new("provider_protocol", "provider returned invalid UTF-8")
                         })?;
                         Ok(json!({"text":text, "response_format":format}))
                     })
@@ -76,8 +82,33 @@ impl Provider {
     }
 }
 
-fn prepare(arguments: Value, limit: usize) -> Result<(Form, String)> {
+fn prepare(arguments: Value, limit: usize, provider: ServiceProvider) -> Result<(Form, String)> {
     let mut arguments = arguments.as_object().expect("validated object").clone();
+    if provider == ServiceProvider::OpenRouter {
+        for field in ["source_url", "input_audio"] {
+            if arguments.contains_key(field) {
+                return Err(media::invalid());
+            }
+        }
+        if arguments
+            .get("response_format")
+            .is_some_and(|v| v != "json" && v != "verbose_json")
+        {
+            return Err(invalid(
+                "OpenRouter transcription supports json or verbose_json",
+            ));
+        }
+        for field in ["provider", "trace"] {
+            if let Some(value) = arguments.get_mut(field) {
+                if !value.is_object() {
+                    return Err(invalid(
+                        "OpenRouter provider and trace options must be objects",
+                    ));
+                }
+                *value = Value::String(value.to_string());
+            }
+        }
+    }
     if !arguments
         .get("model")
         .and_then(Value::as_str)

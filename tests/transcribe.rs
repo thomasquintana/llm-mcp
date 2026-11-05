@@ -42,6 +42,7 @@ async fn fixture(
     delay: Duration,
     settings: &[(&str, &str)],
 ) -> Fixture {
+    let router = settings.contains(&("LLM_MCP_PROVIDER", "openrouter"));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1/", listener.local_addr().unwrap());
     let (tx, rx) = mpsc::unbounded_channel();
@@ -52,7 +53,11 @@ async fn fixture(
             let response = response.clone();
             async move {
                 assert_eq!(headers["authorization"], "Bearer test");
-                assert_eq!(headers["openai-organization"], "org-test");
+                if router {
+                    assert!(!headers.contains_key("openai-organization"));
+                } else {
+                    assert_eq!(headers["openai-organization"], "org-test");
+                }
                 let mut fields = Vec::new();
                 while let Some(field) = multipart.next_field().await.unwrap() {
                     let name = field.name().unwrap().to_owned();
@@ -84,8 +89,8 @@ async fn fixture(
             return Some((*value).into());
         }
         match key {
-            "OPENAI_API_KEY" => Some("test".into()),
-            "OPENAI_BASE_URL" => Some(url.clone()),
+            "OPENAI_API_KEY" | "OPENROUTER_API_KEY" => Some("test".into()),
+            "OPENAI_BASE_URL" | "OPENROUTER_BASE_URL" => Some(url.clone()),
             "OPENAI_ORGANIZATION" => Some("org-test".into()),
             _ => None,
         }
@@ -106,6 +111,74 @@ fn values<'a>(fields: &'a [Field], name: &str) -> Vec<&'a str> {
         .filter(|field| field.name == name)
         .map(|field| std::str::from_utf8(&field.bytes).unwrap())
         .collect()
+}
+
+#[tokio::test]
+async fn openrouter_uploads_json_options_and_rejects_unsupported_formats_and_sources() {
+    let response = json!({"text":"Hello", "usage":{"cost":0.001},"future":true});
+    let mut f = fixture(
+        response.to_string().into_bytes(),
+        StatusCode::OK,
+        Duration::ZERO,
+        &[("LLM_MCP_PROVIDER", "openrouter")],
+    )
+    .await;
+    let mut body = request();
+    body["model"] = json!("openai/whisper-large-v3");
+    body["provider"] = json!({"zdr":true,"options":{"openai":{"future":1}}});
+    body["trace"] = json!({"trace_id":"example","custom":{"a":true}});
+    body["timestamp_granularities"] = json!(["word", "segment"]);
+    body["response_format"] = json!("verbose_json");
+    assert_eq!(
+        f.provider
+            .call(
+                Operation::Transcribe,
+                body.clone(),
+                CancellationToken::new()
+            )
+            .await
+            .unwrap(),
+        response
+    );
+    let fields = f.captured.recv().await.unwrap();
+    for name in ["provider", "trace"] {
+        assert_eq!(
+            serde_json::from_str::<Value>(values(&fields, name)[0]).unwrap(),
+            body[name]
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .filter(|field| field.name.starts_with(name))
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        values(&fields, "timestamp_granularities[]"),
+        ["word", "segment"]
+    );
+    assert_eq!(
+        fields.iter().find(|f| f.name == "file").unwrap().bytes,
+        b"RIFF\0\x01\x80\xffWAVE"
+    );
+    for (name, value) in [
+        ("response_format", json!("text")),
+        ("response_format", json!("diarized_json")),
+        ("source_url", json!("https://private.example")),
+        ("input_audio", json!({"data":"https://private.example"})),
+        ("provider", json!("not an object")),
+    ] {
+        let mut invalid = request();
+        invalid[name] = value;
+        assert!(
+            f.provider
+                .call(Operation::Transcribe, invalid, CancellationToken::new())
+                .await
+                .is_err()
+        );
+    }
+    assert!(f.captured.try_recv().is_err());
 }
 
 #[tokio::test]

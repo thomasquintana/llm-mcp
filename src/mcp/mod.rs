@@ -2,7 +2,7 @@
 
 use crate::{
     VERSION,
-    config::AuthMode,
+    config::{AuthMode, ServiceProvider},
     provider::{Operation, Provider},
 };
 use rmcp::{
@@ -83,13 +83,14 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tools(
+        Ok(ListToolsResult::with_all_items(tools_for(
+            self.provider.config.provider,
             self.provider.config.auth,
         )))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        tools(self.provider.config.auth)
+        tools_for(self.provider.config.provider, self.provider.config.auth)
             .into_iter()
             .find(|t| t.name == name)
     }
@@ -118,6 +119,11 @@ pub fn server_info() -> ServerConfig {
 
 /// Deterministic, forward-compatible descriptors. Options are provider request fields.
 pub fn tools(auth: AuthMode) -> Vec<Tool> {
+    tools_for(ServiceProvider::OpenAI, auth)
+}
+
+/// Provider-specific descriptors with native request fields and complete results.
+pub fn tools_for(provider: ServiceProvider, auth: AuthMode) -> Vec<Tool> {
     let schema = json!({
         "type": "object",
         "properties": {
@@ -160,24 +166,81 @@ pub fn tools(auth: AuthMode) -> Vec<Tool> {
             properties.insert("known_speaker_references".into(), json!({"type":"array","items":{"type":"string"},"description":"Base64 audio data URLs only."}));
             input.insert("required".into(), json!(["model","file"]));
         }
+        let mut description = description.to_owned();
+        if provider == ServiceProvider::OpenRouter {
+            match name {
+                "generate" => {
+                    description = "Call OpenRouter Responses with full text/base64 image history and native options. Return the complete response; execute function calls in the caller. Stateless: store must be false and previous_response_id must be omitted or null.".into();
+                    let properties = input["properties"].as_object_mut().expect("static properties");
+                    properties.insert("store".into(), json!({"type":"boolean","const":false}));
+                    properties.insert("previous_response_id".into(), json!({"type":"null"}));
+                }
+                "classify" => {
+                    description = "Call OpenRouter alpha Decisions using native state and named questions (noul, choice, score, box). Return complete native answers and probabilities. Images must be base64 image_url parts or PNG/JPEG assets; audio/video/file parts and remote media URLs are rejected. Model/provider capabilities vary; alpha API may change.".into();
+                    input = openrouter_classify_schema();
+                }
+                "embed" => {
+                    input["properties"]["input"]["description"] = json!("Embedding text, string batch, token array or token batch. Mutually exclusive with inputs. Use OpenRouter model identifiers.");
+                }
+                "transcribe" => {
+                    description = "Transcribe base64 audio using OpenRouter audio/transcriptions. Supply model and file bytes with filename/MIME type. Return complete JSON; json and verbose_json formats only. Provider and trace options are objects. URLs and file references are rejected. API-key mode only.".into();
+                    input["properties"]["response_format"]["enum"] = json!(["json","verbose_json"]);
+                    input["properties"].as_object_mut().expect("static properties").remove("known_speaker_references");
+                }
+                _ => unreachable!("static tools"),
+            }
+        }
         Tool::new(name, description, input).with_raw_output_schema(output.clone())
             .with_annotations(ToolAnnotations::new().read_only(false).destructive(false).idempotent(false).open_world(true))
     }).collect()
 }
 
+fn openrouter_classify_schema() -> serde_json::Map<String, Value> {
+    let guidance = json!({"type":["string","object","array"]});
+    json!({
+        "type":"object", "required":["model","state","questions"], "additionalProperties":true,
+        "properties":{
+            "model":{"type":"string","minLength":1,"description":"OpenRouter Decisions model identifier."},
+            "state":{"type":["string","object","array"],"description":"Native evaluation context. Image parts use type:image_url and image_url:{url:data:<MIME>;base64,...}; never remote URLs."},
+            "questions":{"type":"object","minProperties":1,"additionalProperties":{
+                "type":"object","required":["type","instructions"],"additionalProperties":true,
+                "properties":{"type":{"type":"string","enum":["noul","choice","score","box"]},"instructions":guidance,
+                    "criteria":{"description":"noul: optional true/false guidance object; choice: named choices object; score: ordered criteria array; box: omit criteria."}},
+                "allOf":[
+                    {"if":{"properties":{"type":{"const":"choice"}}},"then":{"required":["criteria"],"properties":{"criteria":{"type":"object","minProperties":1}}}},
+                    {"if":{"properties":{"type":{"const":"score"}}},"then":{"required":["criteria"],"properties":{"criteria":{"type":"array","minItems":1}}}}
+                ]
+            }},
+            "assets":{"type":"object","additionalProperties":{"type":"object","required":["format","data_base64"],"additionalProperties":false,"properties":{"type":{"const":"image"},"format":{"enum":["png","jpg","jpeg"]},"data_base64":{"type":"string","minLength":1}}},"description":"Base64 PNG/JPEG assets referenced by key in native context; each asset must be used."},
+            "provider":{"type":"object","description":"Native OpenRouter routing preferences."},
+            "stream":{"type":"boolean","const":false}, "background":{"type":"boolean","const":false}
+        }
+    }).as_object().expect("static object").clone()
+}
+
 /// Export exact descriptors and identity without requiring provider credentials.
 pub fn catalog(auth: AuthMode) -> Value {
-    json!({"protocolVersion":crate::MCP_PROTOCOL_VERSION, "serverInfo":server_info().server_info, "tools":tools(auth)})
+    catalog_for(ServiceProvider::OpenAI, auth)
+}
+
+/// Export provider-specific descriptors without requiring provider credentials.
+pub fn catalog_for(provider: ServiceProvider, auth: AuthMode) -> Value {
+    json!({"protocolVersion":crate::MCP_PROTOCOL_VERSION, "serverInfo":server_info().server_info, "tools":tools_for(provider, auth)})
 }
 
 /// Export HTLK's catalog input format for the selected deployment transport.
 pub fn htlk_catalog(transport: &str, auth: AuthMode) -> Value {
+    htlk_catalog_for(transport, ServiceProvider::OpenAI, auth)
+}
+
+/// Export provider-specific HTLK descriptors for a deployment transport.
+pub fn htlk_catalog_for(transport: &str, provider: ServiceProvider, auth: AuthMode) -> Value {
     json!({
         "tools": {
             "catalog_version":"0.1", "mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,
             "servers":{"llm":{"deployment_id":"llm-mcp", "transport":transport, "implementation_name":"llm-mcp", "implementation_version":VERSION}},
             "schema_documents":{},
-            "tools": tools(auth).into_iter().map(|descriptor| json!({"server":"llm", "descriptor":descriptor})).collect::<Vec<_>>()
+            "tools": tools_for(provider, auth).into_iter().map(|descriptor| json!({"server":"llm", "descriptor":descriptor})).collect::<Vec<_>>()
         },
         "resources":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"resources":[],"templates":[]},
         "prompts":{"catalog_version":"0.1","mcp_protocol_version":crate::MCP_PROTOCOL_VERSION,"servers":{},"schema_documents":{},"prompts":[]}

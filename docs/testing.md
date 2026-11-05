@@ -1,7 +1,7 @@
 # End-to-end and live-provider testing
 
 `cargo test --all-features --locked` includes **automatic, credential-gated tests
-against the real OpenAI service**. There is no extra opt-in flag or `#[ignore]` gate.
+against real OpenAI and OpenRouter services**. There is no extra opt-in flag or `#[ignore]` gate.
 These run alongside deterministic unit, mock-provider and MCP transport tests.
 
 ## Independent credential gates
@@ -10,6 +10,7 @@ These run alongside deterministic unit, mock-provider and MCP transport tests.
 |---|---|---|
 | `live_openai_api_key` | Nonempty `OPENAI_API_KEY` | Generation text/images, classification text/images, text embeddings, multi-image contextual embeddings and spoken-audio transcription |
 | `live_openai_oauth` | Existing OAuth credential record or pending recovery state | Generation text/images, generation-only discovery and rejection of classification/embedding/transcription |
+| `live_openrouter_api_key` | Nonempty `OPENROUTER_API_KEY` | Generation text/images and function continuation, native alpha Decisions text/images, text/contextual-image embeddings and spoken-audio transcription |
 
 OAuth uses `LLM_MCP_OAUTH_CREDENTIALS_PATH` or the server's normal default
 `$HOME/.config/llm-mcp/auth.json` (`USERPROFILE` on Windows). Tests use the existing
@@ -18,9 +19,9 @@ credentials into a temporary store. The OAuth record must have one owner: stop a
 server using that record before testing. Normal refresh may update the original
 credential state.
 
-Both credentials may be available to the test runner. Each child server still uses
-one mutually exclusive authentication mode. API-key children receive only the API
-key; OAuth children have `OPENAI_API_KEY` removed. Modes and transports run
+All credentials may be available to the test runner. Each child server still uses
+one provider and authentication mode. API-key children receive only their selected
+provider's API key; OAuth children have both API keys removed. Providers, modes and transports run
 sequentially, releasing the OAuth record before starting the next process.
 
 ### Skip versus failure
@@ -38,8 +39,9 @@ silently counted as a passing unit test. With no credentials, output includes:
 ```text
 SKIP live_openai_api_key: OPENAI_API_KEY is absent/empty
 SKIP live_openai_oauth: OAuth credential record is absent
-Live OpenAI E2E: 0 suites passed, 0 failed, 2 skipped, 0 filtered out; 0 checks passed.
-No live OpenAI tests executed.
+SKIP live_openrouter_api_key: OPENROUTER_API_KEY is absent/empty
+Live provider E2E: 0 suites passed, 0 failed, 3 skipped, 0 filtered out; 0 checks passed.
+No live provider tests executed.
 ```
 
 Any failed suite makes the target exit unsuccessfully. A failed suite aborts its
@@ -58,30 +60,33 @@ cargo test --all-features --locked --test provider_e2e
 # Select one authentication suite:
 cargo test --locked --test provider_e2e live_openai_api_key
 cargo test --locked --test provider_e2e live_openai_oauth
+cargo test --locked --test provider_e2e live_openrouter_api_key
 
 # List suites without accessing credentials or making provider requests:
 cargo test --locked --test provider_e2e -- --list
 
 # Explicitly filter live suites out of a deterministic-only run:
-cargo test --all-features --locked -- --skip live_openai_
+cargo test --all-features --locked -- --skip live_openai_ --skip live_openrouter_
 ```
 
 Standard name filters, `--exact`, `--skip`, `--list`, `--nocapture`, and
 `--test-threads` are accepted. There are no ignored live cases, so `--ignored`
-selects none. Selecting an unrelated unit-test name also filters out both live
+selects none. Selecting an unrelated unit-test name also filters out all live
 suites. Without filters, credential availability alone activates each suite.
 
-Live requests incur normal OpenAI usage. Repeated test or coverage runs repeat the
+Live requests incur normal provider usage. Repeated test or coverage runs repeat the
 live cases whenever credentials are present. A credential-free environment can run
 all deterministic checks, including regressions for the live-test driver and its
-assertions, without contacting OpenAI.
+assertions, without contacting providers. Tests do not load `.env` automatically;
+export its settings in your test shell when you intend to run live checks.
 
 ## Models and deadlines
 
 Tests choose their own isolated application settings rather than inheriting
-`LLM_MCP_AUTH`, a development mock URL, or unrelated server limits. The live
-provider URL is always **`https://api.openai.com/v1/`**; `OPENAI_BASE_URL` cannot turn
-this suite into another mock-provider test. API-key organization/project settings
+`LLM_MCP_PROVIDER`, `LLM_MCP_AUTH`, a development mock URL, or unrelated server limits.
+Live provider URLs are pinned to **`https://api.openai.com/v1/`** and
+**`https://openrouter.ai/api/v1/`**; base URL environment overrides cannot turn
+these suites into mock-provider tests. OpenAI API-key organization/project settings
 and OS TLS/proxy configuration are retained. The local MCP HTTP client bypasses
 proxies and rejects redirects.
 
@@ -93,6 +98,11 @@ proxies and rejects redirects.
 | `LLM_MCP_E2E_EMBED_MODEL` | `text-embedding-3-small` | Float embeddings with 64 dimensions |
 | `LLM_MCP_E2E_DESCRIPTION_MODEL` | `gpt-4.1-mini` | Detailed multi-image description within `embed` |
 | `LLM_MCP_E2E_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | JSON transcription of the spoken fixture |
+| `LLM_MCP_E2E_OPENROUTER_GENERATE_MODEL` | `openai/gpt-4.1-mini` | OpenRouter text/image generation and function continuation |
+| `LLM_MCP_E2E_OPENROUTER_CLASSIFY_MODEL` | `typesafe/jev-1.14` | Native noul/choice classification with text and a 512×512 PNG |
+| `LLM_MCP_E2E_OPENROUTER_EMBED_MODEL` | `openai/text-embedding-3-small` | OpenRouter float embeddings with 64 dimensions |
+| `LLM_MCP_E2E_OPENROUTER_DESCRIPTION_MODEL` | `openai/gpt-4.1-mini` | OpenRouter multi-image descriptions within embed |
+| `LLM_MCP_E2E_OPENROUTER_TRANSCRIBE_MODEL` | `openai/whisper-large-v3` | OpenRouter JSON audio transcription |
 | `LLM_MCP_E2E_TIMEOUT_MS` | `120000` | Per-tool server deadline |
 
 Overrides must support the scenario's modalities/options; an unavailable or
@@ -128,13 +138,17 @@ input-index mapping, original context plus a usable image description, returned
 description model/usage, and expected transcript words. Multiple related images
 produce one vector for their item, followed by an independent text-only item. The
 tests avoid exact generated prose, exact vectors and transcript punctuation.
+OpenRouter adds a real two-call function continuation: a forced function call is
+returned to the caller, which supplies a synthetic result in full history; the
+follow-up must identify that result. Classification assertions inspect native
+named answers and probabilities rather than OpenAI's answer array.
 
 ## Other integration layers
 
 - `tests/live_harness.rs`: offline driver/gate/assertion regressions, including
   invalid credentials, authentication isolation, failure redaction and both real
   server transports against a local provider.
-- `tests/provider.rs`, `tests/embed.rs`, `tests/transcribe.rs`: deterministic
+- `tests/provider.rs`, `tests/openrouter.rs`, `tests/configuration.rs`, `tests/embed.rs`, `tests/transcribe.rs`: deterministic
   provider contracts, failures, multipart bytes, cancellation and resource bounds.
 - `tests/transports.rs`: independent MCP wire tests with mock providers.
 - `python3 tools/check_htlk.py`: real sibling HTLK compiler/runtime workflows with

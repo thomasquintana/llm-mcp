@@ -1,0 +1,404 @@
+{
+  "prompts": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "prompts": [],
+    "schema_documents": {},
+    "servers": {}
+  },
+  "resources": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "resources": [],
+    "schema_documents": {},
+    "servers": {},
+    "templates": []
+  },
+  "tools": {
+    "catalog_version": "0.1",
+    "mcp_protocol_version": "2025-11-25",
+    "schema_documents": {},
+    "servers": {
+      "llm": {
+        "deployment_id": "llm-mcp",
+        "implementation_name": "llm-mcp",
+        "implementation_version": "0.1.0",
+        "transport": "stdio"
+      }
+    },
+    "tools": [
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Call OpenRouter Responses with full text/base64 image history and native options. Return the complete response; execute function calls in the caller. Stateless: store must be false and previous_response_id must be omitted or null.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "input": {
+                "description": "Full provider input including conversation/tool history and text or input_image parts. Images must use base64 data URLs, never remote URLs or file IDs."
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "previous_response_id": {
+                "type": "null"
+              },
+              "store": {
+                "const": false,
+                "type": "boolean"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          },
+          "name": "generate",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
+      },
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Call OpenRouter alpha Decisions using native state and named questions (noul, choice, score, box). Return complete native answers and probabilities. Images must be base64 image_url parts or PNG/JPEG assets; audio/video/file parts and remote media URLs are rejected. Model/provider capabilities vary; alpha API may change.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "properties": {
+              "assets": {
+                "additionalProperties": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data_base64": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "format": {
+                      "enum": [
+                        "png",
+                        "jpg",
+                        "jpeg"
+                      ]
+                    },
+                    "type": {
+                      "const": "image"
+                    }
+                  },
+                  "required": [
+                    "format",
+                    "data_base64"
+                  ],
+                  "type": "object"
+                },
+                "description": "Base64 PNG/JPEG assets referenced by key in native context; each asset must be used.",
+                "type": "object"
+              },
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "model": {
+                "description": "OpenRouter Decisions model identifier.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "provider": {
+                "description": "Native OpenRouter routing preferences.",
+                "type": "object"
+              },
+              "questions": {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {
+                          "type": {
+                            "const": "choice"
+                          }
+                        }
+                      },
+                      "then": {
+                        "properties": {
+                          "criteria": {
+                            "minProperties": 1,
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "criteria"
+                        ]
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "type": {
+                            "const": "score"
+                          }
+                        }
+                      },
+                      "then": {
+                        "properties": {
+                          "criteria": {
+                            "minItems": 1,
+                            "type": "array"
+                          }
+                        },
+                        "required": [
+                          "criteria"
+                        ]
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "criteria": {
+                      "description": "noul: optional true/false guidance object; choice: named choices object; score: ordered criteria array; box: omit criteria."
+                    },
+                    "instructions": {
+                      "type": [
+                        "string",
+                        "object",
+                        "array"
+                      ]
+                    },
+                    "type": {
+                      "enum": [
+                        "noul",
+                        "choice",
+                        "score",
+                        "box"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "instructions"
+                  ],
+                  "type": "object"
+                },
+                "minProperties": 1,
+                "type": "object"
+              },
+              "state": {
+                "description": "Native evaluation context. Image parts use type:image_url and image_url:{url:data:<MIME>;base64,...}; never remote URLs.",
+                "type": [
+                  "string",
+                  "object",
+                  "array"
+                ]
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model",
+              "state",
+              "questions"
+            ],
+            "type": "object"
+          },
+          "name": "classify",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
+      },
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Embed text/tokens directly or prepare contextual descriptions of base64 images, then embed original context plus description. One vector per item; a preparation failure fails the whole call. Return full embedding response and indexed preparation metadata. API-key mode only.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "oneOf": [
+              {
+                "not": {
+                  "required": [
+                    "inputs"
+                  ]
+                },
+                "required": [
+                  "input"
+                ]
+              },
+              {
+                "not": {
+                  "required": [
+                    "input"
+                  ]
+                },
+                "required": [
+                  "inputs"
+                ]
+              }
+            ],
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "description": {
+                "additionalProperties": false,
+                "description": "Vision model and optional guidance, required for image-bearing inputs.",
+                "properties": {
+                  "instructions": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "model"
+                ],
+                "type": "object"
+              },
+              "input": {
+                "description": "Embedding text, string batch, token array or token batch. Mutually exclusive with inputs. Use OpenRouter model identifiers."
+              },
+              "inputs": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content": {
+                      "description": "Ordered input_text and base64 input_image parts. All images in this item produce one description and one vector.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model"
+            ],
+            "type": "object"
+          },
+          "name": "embed",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
+      },
+      {
+        "descriptor": {
+          "annotations": {
+            "destructiveHint": false,
+            "idempotentHint": false,
+            "openWorldHint": true,
+            "readOnlyHint": false
+          },
+          "description": "Transcribe base64 audio using OpenRouter audio/transcriptions. Supply model and file bytes with filename/MIME type. Return complete JSON; json and verbose_json formats only. Provider and trace options are objects. URLs and file references are rejected. API-key mode only.",
+          "inputSchema": {
+            "additionalProperties": true,
+            "properties": {
+              "background": {
+                "const": false,
+                "type": "boolean"
+              },
+              "file": {
+                "additionalProperties": false,
+                "properties": {
+                  "data_base64": {
+                    "description": "Canonical base64 file bytes, without a data URL prefix.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "filename": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "mime_type",
+                  "data_base64"
+                ],
+                "type": "object"
+              },
+              "model": {
+                "description": "Provider model identifier.",
+                "type": "string"
+              },
+              "response_format": {
+                "default": "json",
+                "enum": [
+                  "json",
+                  "verbose_json"
+                ],
+                "type": "string"
+              },
+              "stream": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model",
+              "file"
+            ],
+            "type": "object"
+          },
+          "name": "transcribe",
+          "outputSchema": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "server": "llm"
+      }
+    ]
+  }
+}

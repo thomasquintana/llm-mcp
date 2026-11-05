@@ -13,6 +13,12 @@ use std::time::Duration;
 fn credential_gates_distinguish_absence_from_present_invalid_state() {
     assert!(live::api_key(|_| None).is_none());
     assert!(live::api_key(|_| Some(String::new())).is_none());
+    assert!(live::openrouter_key(|_| None).is_none());
+    assert!(live::openrouter_key(|_| Some(String::new())).is_none());
+    assert!(matches!(
+        live::openrouter_key(|_| Some("test".into())),
+        Some(Credential::OpenRouter(_))
+    ));
     assert!(matches!(
         live::api_key(|_| Some("test".into())),
         Some(Credential::ApiKey(_))
@@ -23,6 +29,17 @@ fn credential_gates_distinguish_absence_from_present_invalid_state() {
         (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH").then(|| path.to_string_lossy().into_owned())
     };
     assert!(live::oauth(get).unwrap().is_none());
+    let missing = temp.path().join("missing").join("nested").join("auth.json");
+    assert!(
+        live::oauth(|key| (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH")
+            .then(|| missing.to_string_lossy().into_owned()))
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        !missing.parent().unwrap().exists(),
+        "credential discovery must not create directories"
+    );
     std::fs::write(&path, "invalid credential record").unwrap();
     assert!(matches!(
         live::oauth(get).unwrap(),
@@ -44,6 +61,20 @@ fn credential_gates_distinguish_absence_from_present_invalid_state() {
             .into_owned()))
         .is_err()
     );
+    let blocked = path
+        .with_extension("pending.json")
+        .join("missing")
+        .join("nested")
+        .join("auth.json");
+    let error = live::oauth(|key| {
+        (key == "LLM_MCP_OAUTH_CREDENTIALS_PATH").then(|| blocked.to_string_lossy().into_owned())
+    })
+    .err()
+    .expect("a file ancestor must fail even with missing intermediate components");
+    assert!(
+        !error.to_string().contains(&*temp.path().to_string_lossy()),
+        "credential diagnostics must not expose the configured path"
+    );
     let default = temp.path().join(".config/llm-mcp");
     std::fs::create_dir_all(&default).unwrap();
     std::fs::write(default.join("auth.json"), "invalid").unwrap();
@@ -59,11 +90,12 @@ fn child_configuration_separates_authentication_and_pins_provider_endpoint() {
     for credential in [
         Credential::ApiKey("test".into()),
         Credential::OAuth("/test/auth.json".into()),
+        Credential::OpenRouter("router-test".into()),
     ] {
         let command = live::command(
             env!("CARGO_BIN_EXE_llm-mcp"),
             &credential,
-            live::OPENAI,
+            credential.endpoint(),
             Duration::from_secs(20),
         );
         let vars: std::collections::HashMap<_, _> = command
@@ -78,9 +110,15 @@ fn child_configuration_separates_authentication_and_pins_provider_endpoint() {
             .collect();
         assert_eq!(vars["LLM_MCP_AUTH"].as_deref(), Some(credential.mode()));
         assert_eq!(
-            vars["OPENAI_BASE_URL"].as_deref(),
-            Some("https://api.openai.com/v1/")
+            vars["LLM_MCP_PROVIDER"].as_deref(),
+            Some(credential.provider())
         );
+        let base = if matches!(credential, Credential::OpenRouter(_)) {
+            "OPENROUTER_BASE_URL"
+        } else {
+            "OPENAI_BASE_URL"
+        };
+        assert_eq!(vars[base].as_deref(), Some(credential.endpoint()));
         assert_eq!(vars["LLM_MCP_TIMEOUT_MS"].as_deref(), Some("20000"));
         match credential {
             Credential::ApiKey(_) => {
@@ -90,6 +128,11 @@ fn child_configuration_separates_authentication_and_pins_provider_endpoint() {
             Credential::OAuth(_) => {
                 assert!(vars["OPENAI_API_KEY"].is_none());
                 assert!(vars["LLM_MCP_OAUTH_CREDENTIALS_PATH"].is_some());
+            }
+            Credential::OpenRouter(_) => {
+                assert_eq!(vars["OPENROUTER_API_KEY"].as_deref(), Some("router-test"));
+                assert!(vars["OPENAI_API_KEY"].is_none());
+                assert!(vars["LLM_MCP_OAUTH_CREDENTIALS_PATH"].is_none());
             }
         }
     }
@@ -101,34 +144,48 @@ async fn independent_driver_handles_both_transports_and_releases_processes() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
     let task = tokio::spawn(async move {
-        axum::serve(listener,Router::new().route("/v1/responses",post(||async { Json(json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]})) }))).await.unwrap();
+        axum::serve(listener,Router::new().route("/v1/responses",post(|Json(body):Json<Value>|async move {
+            if body.get("tools").is_some() { return Json(json!({"status":"completed","output":[{"type":"function_call","name":"lookup_code","call_id":"c1","arguments":"{}"}]})); }
+            let text = if body["input"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "function_call_output")) {"AMBER-7392"} else {"OK"};
+            Json(json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":text}]}]}))
+        }))).await.unwrap();
     });
-    for transport in [Transport::Stdio, Transport::Http] {
-        assert!(!transport.name().is_empty());
-        let mut server = Server::start(
-            env!("CARGO_BIN_EXE_llm-mcp"),
-            &Credential::ApiKey("test".into()),
-            transport,
-            &endpoint,
-            Duration::from_secs(5),
-        )
-        .await
-        .unwrap();
-        assert!(server.pid().is_some());
-        let listed = server.rpc("tools/list", None).await.unwrap();
-        assert_eq!(listed["tools"].as_array().unwrap().len(), 4);
-        let result = server
-            .call("generate", json!({"model":"test", "input":"hello"}))
+    for credential in [
+        Credential::ApiKey("test".into()),
+        Credential::OpenRouter("test".into()),
+    ] {
+        for transport in [Transport::Stdio, Transport::Http] {
+            assert!(!transport.name().is_empty());
+            let mut server = Server::start(
+                env!("CARGO_BIN_EXE_llm-mcp"),
+                &credential,
+                transport,
+                &endpoint,
+                Duration::from_secs(5),
+            )
             .await
             .unwrap();
-        assert_eq!(live::structured(&result).unwrap()["status"], "completed");
-        // A failed call does not prevent explicit cleanup.
-        let result = server
-            .call("generate", json!({"stream":true}))
-            .await
-            .unwrap();
-        assert!(live::structured(&result).is_err());
-        server.shutdown().await.unwrap();
+            assert!(server.pid().is_some());
+            let listed = server.rpc("tools/list", None).await.unwrap();
+            assert_eq!(listed["tools"].as_array().unwrap().len(), 4);
+            let result = server
+                .call("generate", json!({"model":"test", "input":"hello"}))
+                .await
+                .unwrap();
+            assert_eq!(live::structured(&result).unwrap()["status"], "completed");
+            if matches!(credential, Credential::OpenRouter(_)) {
+                provider_cases::function_continuation(&mut server, "test")
+                    .await
+                    .unwrap();
+            }
+            // A failed call does not prevent explicit cleanup.
+            let result = server
+                .call("generate", json!({"stream":true}))
+                .await
+                .unwrap();
+            assert!(live::structured(&result).is_err());
+            server.shutdown().await.unwrap();
+        }
     }
     task.abort();
 }
@@ -175,26 +232,31 @@ async fn rejected_api_credentials_are_failures_not_skips() {
         .await
         .unwrap();
     });
-    for transport in [Transport::Stdio, Transport::Http] {
-        let mut server = Server::start(
-            env!("CARGO_BIN_EXE_llm-mcp"),
-            &Credential::ApiKey("invalid-test".into()),
-            transport,
-            &endpoint,
-            Duration::from_secs(3),
-        )
-        .await
-        .unwrap();
-        let result = server
-            .call("generate", json!({"input":"test"}))
+    for credential in [
+        Credential::ApiKey("invalid-test".into()),
+        Credential::OpenRouter("invalid-test".into()),
+    ] {
+        for transport in [Transport::Stdio, Transport::Http] {
+            let mut server = Server::start(
+                env!("CARGO_BIN_EXE_llm-mcp"),
+                &credential,
+                transport,
+                &endpoint,
+                Duration::from_secs(3),
+            )
             .await
             .unwrap();
-        let error = live::structured(&result).unwrap_err().to_string();
-        assert!(error.contains("authentication"));
-        assert!(error.contains("401"));
-        assert!(error.contains("req-rejected"));
-        assert!(!error.contains("private-secret"));
-        server.shutdown().await.unwrap();
+            let result = server
+                .call("generate", json!({"input":"test"}))
+                .await
+                .unwrap();
+            let error = live::structured(&result).unwrap_err().to_string();
+            assert!(error.contains("authentication"));
+            assert!(error.contains("401"));
+            assert!(error.contains("req-rejected"));
+            assert!(!error.contains("private-secret"));
+            server.shutdown().await.unwrap();
+        }
     }
     task.abort();
 }
@@ -237,6 +299,12 @@ fn real_media_fixtures_have_valid_headers_and_nonempty_speech() {
     assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n");
     assert_eq!(u32::from_be_bytes(image[16..20].try_into().unwrap()), 480);
     assert_eq!(u32::from_be_bytes(image[20..24].try_into().unwrap()), 260);
+    let square = STANDARD
+        .decode(include_str!("fixtures/shapes.square.png.base64").trim())
+        .unwrap();
+    assert_eq!(&square[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(u32::from_be_bytes(square[16..20].try_into().unwrap()), 512);
+    assert_eq!(u32::from_be_bytes(square[20..24].try_into().unwrap()), 512);
     let audio = STANDARD
         .decode(include_str!("fixtures/shapes.wav.base64").trim())
         .unwrap();
@@ -258,9 +326,16 @@ fn real_media_fixtures_have_valid_headers_and_nonempty_speech() {
 
 #[test]
 fn live_case_selection_respects_standard_test_filters_without_implicit_opt_in() {
-    use provider_cases::{API_SUITE, OAUTH_SUITE, Selection};
+    use provider_cases::{API_SUITE, OAUTH_SUITE, OPENROUTER_SUITE, Selection};
     let all = Selection::parse([]).unwrap();
     assert!(all.includes(API_SUITE) && all.includes(OAUTH_SUITE));
+    assert!(all.includes(OPENROUTER_SUITE));
+    let router = Selection::parse(["openrouter".into()]).unwrap();
+    assert!(
+        router.includes(OPENROUTER_SUITE)
+            && !router.includes(API_SUITE)
+            && !router.includes(OAUTH_SUITE)
+    );
     let oauth =
         Selection::parse(["--nocapture", "oauth", "--test-threads", "1"].map(str::to_owned))
             .unwrap();
@@ -283,6 +358,28 @@ fn live_case_selection_respects_standard_test_filters_without_implicit_opt_in() 
 
 #[test]
 fn live_model_settings_and_timeouts_are_explicit_and_mode_specific() {
+    let router = provider_cases::cases(&Credential::OpenRouter("test".into()), |key| {
+        (key == "LLM_MCP_E2E_OPENROUTER_GENERATE_MODEL").then(|| "author/model".into())
+    })
+    .unwrap();
+    assert_eq!(router[0].model, "author/model");
+    assert_eq!(
+        router[2].arguments["questions"]["red_square"]["type"],
+        "noul"
+    );
+    assert_eq!(router[3].arguments["state"][1]["type"], "image_url");
+    for (index, choice) in [(2, "left"), (3, "42")] {
+        let value = json!({"answers":{"red_square":{"type":"noul","noul":0.99},"selection":{"type":"choice","choice":choice,"probabilities":{choice:0.99}}}});
+        assert!(router[index].evaluate(&tool_success(value.clone())).is_ok());
+        let mut wrong = value;
+        wrong["answers"]["red_square"]["noul"] = json!(0.1);
+        assert!(router[index].evaluate(&tool_success(wrong)).is_err());
+        assert!(
+            router[index]
+                .evaluate(&tool_success(json!({"answers":[]})))
+                .is_err()
+        );
+    }
     assert_eq!(
         provider_cases::timeout(|_| None).unwrap(),
         Duration::from_secs(120)

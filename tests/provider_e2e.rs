@@ -1,4 +1,4 @@
-//! Automatic credential-gated E2E tests against the real OpenAI service.
+//! Automatic credential-gated E2E tests against real OpenAI and OpenRouter services.
 //!
 //! A custom runner makes runtime credential skips visible in ordinary cargo test
 //! output instead of representing an unexecuted live check as a passing unit test.
@@ -9,7 +9,7 @@ mod live;
 mod provider_cases;
 
 use live::{Credential, Failure, Result, Server, Transport};
-use provider_cases::{API_SUITE, OAUTH_SUITE, Selection};
+use provider_cases::{API_SUITE, OAUTH_SUITE, OPENROUTER_SUITE, Selection};
 use std::{collections::HashMap, process::ExitCode};
 
 #[tokio::main]
@@ -18,7 +18,7 @@ async fn main() -> ExitCode {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(error) => {
-            eprintln!("FAIL live OpenAI E2E configuration: {error}");
+            eprintln!("FAIL live provider E2E configuration: {error}");
             ExitCode::FAILURE
         }
     }
@@ -27,7 +27,7 @@ async fn main() -> ExitCode {
 async fn run() -> Result<bool> {
     let selection = Selection::parse(std::env::args().skip(1))?;
     if selection.list {
-        for name in [API_SUITE, OAUTH_SUITE] {
+        for name in [API_SUITE, OAUTH_SUITE, OPENROUTER_SUITE] {
             if selection.includes(name) {
                 println!("{name}: test");
             }
@@ -37,6 +37,7 @@ async fn run() -> Result<bool> {
     let mut environment = HashMap::new();
     for key in [
         "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
         "HOME",
         "USERPROFILE",
         "LLM_MCP_OAUTH_CREDENTIALS_PATH",
@@ -47,6 +48,11 @@ async fn run() -> Result<bool> {
         "LLM_MCP_E2E_EMBED_MODEL",
         "LLM_MCP_E2E_DESCRIPTION_MODEL",
         "LLM_MCP_E2E_TRANSCRIBE_MODEL",
+        "LLM_MCP_E2E_OPENROUTER_GENERATE_MODEL",
+        "LLM_MCP_E2E_OPENROUTER_CLASSIFY_MODEL",
+        "LLM_MCP_E2E_OPENROUTER_EMBED_MODEL",
+        "LLM_MCP_E2E_OPENROUTER_DESCRIPTION_MODEL",
+        "LLM_MCP_E2E_OPENROUTER_TRANSCRIBE_MODEL",
     ] {
         if let Some(value) = std::env::var_os(key) {
             environment.insert(
@@ -63,13 +69,15 @@ async fn run() -> Result<bool> {
     let mut skipped = 0;
     let mut filtered = 0;
     let mut checks = 0;
-    for name in [API_SUITE, OAUTH_SUITE] {
+    for name in [API_SUITE, OAUTH_SUITE, OPENROUTER_SUITE] {
         if !selection.includes(name) {
             filtered += 1;
             continue;
         }
         let credential = if name == API_SUITE {
             Ok(live::api_key(get))
+        } else if name == OPENROUTER_SUITE {
+            Ok(live::openrouter_key(get))
         } else {
             live::oauth(get)
         };
@@ -78,6 +86,8 @@ async fn run() -> Result<bool> {
             Ok(None) => {
                 let reason = if name == API_SUITE {
                     "OPENAI_API_KEY is absent/empty"
+                } else if name == OPENROUTER_SUITE {
+                    "OPENROUTER_API_KEY is absent/empty"
                 } else {
                     "OAuth credential record is absent"
                 };
@@ -103,10 +113,10 @@ async fn run() -> Result<bool> {
         }
     }
     eprintln!(
-        "Live OpenAI E2E: {passed} suites passed, {failed} failed, {skipped} skipped, {filtered} filtered out; {checks} checks passed."
+        "Live provider E2E: {passed} suites passed, {failed} failed, {skipped} skipped, {filtered} filtered out; {checks} checks passed."
     );
     if passed == 0 && failed == 0 {
-        eprintln!("No live OpenAI tests executed.");
+        eprintln!("No live provider tests executed.");
     }
     Ok(failed == 0)
 }
@@ -119,13 +129,21 @@ async fn run_suite(
     let timeout = provider_cases::timeout(get)?;
     let cases = provider_cases::cases(credential, get)?;
     for transport in [Transport::Stdio, Transport::Http] {
-        let context = format!("{}/{}", credential.mode(), transport.name());
-        eprintln!("RUN {context}: start real server -> {}", live::OPENAI);
+        let context = format!(
+            "{}/{}/{}",
+            credential.provider(),
+            credential.mode(),
+            transport.name()
+        );
+        eprintln!(
+            "RUN {context}: start real server -> {}",
+            credential.endpoint()
+        );
         let mut server = Server::start(
             env!("CARGO_BIN_EXE_llm-mcp"),
             credential,
             transport,
-            live::OPENAI,
+            credential.endpoint(),
             timeout,
         )
         .await?;
@@ -143,6 +161,11 @@ async fn run_suite(
                 case.evaluate(&result)
                     .map_err(|error| Failure(format!("{context}/{}: {error}", case.name)))?;
                 eprintln!("PASS {context}/{}", case.name);
+                *checks += 1;
+            }
+            if matches!(credential, Credential::OpenRouter(_)) {
+                provider_cases::function_continuation(&mut server, &cases[0].model).await?;
+                eprintln!("PASS {context}/function_continuation");
                 *checks += 1;
             }
             Ok(())

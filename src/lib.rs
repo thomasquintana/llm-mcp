@@ -1,4 +1,4 @@
-//! Stateless OpenAI generation, classification, embedding and transcription over MCP.
+//! Stateless OpenAI and OpenRouter generation, classification, embedding and transcription over MCP.
 
 pub mod auth;
 pub mod config;

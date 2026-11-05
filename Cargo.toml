@@ -5,9 +5,9 @@ edition = "2024"
 rust-version = "1.98"
 license = "Apache-2.0"
 repository = "https://github.com/thomasquintana/llm-mcp"
-description = "Stateless OpenAI generation, decisions, embeddings and transcription over MCP"
+description = "Stateless OpenAI and OpenRouter generation, decisions, embeddings and transcription over MCP"
 readme = "README.md"
-keywords = ["mcp", "openai", "llm", "classification"]
+keywords = ["mcp", "openai", "openrouter", "llm", "classification"]
 categories = ["command-line-utilities", "web-programming"]
 exclude = [".opencode/", "deploy/", ".github/"]
 

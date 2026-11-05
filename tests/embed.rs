@@ -32,6 +32,7 @@ impl Drop for Fixture {
 }
 
 async fn fixture(replies: Vec<Reply>, settings: &[(&str, &str)]) -> Fixture {
+    let router = settings.contains(&("LLM_MCP_PROVIDER", "openrouter"));
     let (tx, rx) = mpsc::unbounded_channel();
     let replies = Arc::new(Mutex::new(VecDeque::from(replies)));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -45,8 +46,13 @@ async fn fixture(replies: Vec<Reply>, settings: &[(&str, &str)]) -> Fixture {
                 let tx = tx.clone();
                 async move {
                     assert_eq!(headers["authorization"], "Bearer test");
-                    assert_eq!(headers["openai-organization"], "org-test");
-                    assert_eq!(headers["openai-project"], "proj-test");
+                    if router {
+                        assert!(!headers.contains_key("openai-organization"));
+                        assert!(!headers.contains_key("openai-project"));
+                    } else {
+                        assert_eq!(headers["openai-organization"], "org-test");
+                        assert_eq!(headers["openai-project"], "proj-test");
+                    }
                     tx.send((uri.path().to_owned(), body)).unwrap();
                     let (status, value, delay) = replies
                         .lock()
@@ -67,8 +73,8 @@ async fn fixture(replies: Vec<Reply>, settings: &[(&str, &str)]) -> Fixture {
             return Some((*value).to_owned());
         }
         match key {
-            "OPENAI_API_KEY" => Some("test".into()),
-            "OPENAI_BASE_URL" => Some(url.clone()),
+            "OPENAI_API_KEY" | "OPENROUTER_API_KEY" => Some("test".into()),
+            "OPENAI_BASE_URL" | "OPENROUTER_BASE_URL" => Some(url.clone()),
             "OPENAI_ORGANIZATION" => Some("org-test".into()),
             "OPENAI_PROJECT" => Some("proj-test".into()),
             _ => None,
@@ -92,6 +98,36 @@ fn image() -> Value {
 }
 fn multimodal() -> Value {
     json!({"model":"embedding-model", "inputs":[{"content":[{"type":"input_text", "text":"Maintenance context"},image()]}], "description":{"model":"vision-model"}})
+}
+
+#[tokio::test]
+async fn openrouter_prepares_images_and_embeds_through_same_provider() {
+    let response =
+        json!({"data":[{"index":0,"embedding":[0.1]}],"usage":{"cost":0.001},"future":true});
+    let mut f = fixture(
+        vec![ok(description("Pump P-17")), ok(response.clone())],
+        &[("LLM_MCP_PROVIDER", "openrouter")],
+    )
+    .await;
+    let mut request = multimodal();
+    request["model"] = json!("openai/text-embedding-3-small");
+    request["description"]["model"] = json!("openai/gpt-4.1-mini");
+    request["provider"] = json!({"order":["openai"]});
+    let result = f
+        .provider
+        .call(Operation::Embed, request, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result["response"], response);
+    assert_eq!(result["prepared_inputs"][0]["description"], "Pump P-17");
+    let (path, body) = f.captured.recv().await.unwrap();
+    assert_eq!(path, "/v1/responses");
+    assert_eq!(body["model"], "openai/gpt-4.1-mini");
+    assert_eq!(body["store"], false);
+    let (path, body) = f.captured.recv().await.unwrap();
+    assert_eq!(path, "/v1/embeddings");
+    assert_eq!(body["input"][0], result["prepared_inputs"][0]["text"]);
+    assert_eq!(body["provider"], json!({"order":["openai"]}));
 }
 
 #[tokio::test]

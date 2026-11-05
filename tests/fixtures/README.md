@@ -12,6 +12,9 @@ stored as base64 so tests can use the same inline representation as MCP callers.
   recorded in the generator. The original text is: **“The red square is next to
   the blue circle.”** The WAV is normalized to a regular header with actual sizes.
   eSpeak NG is only a fixture-generation tool, not a build/runtime dependency.
+- `shapes.square.png.base64`: the same shapes and labels on a 512 × 512 RGB
+  canvas for OpenRouter Decisions. Jev rejected the original rectangular fixture
+  dimensions during live verification. Generated alongside the original image.
 
 Regenerate the image with `python3 tools/generate_e2e_fixtures.py`; use `--audio`
 to regenerate speech too (requires Docker and package-download access). The

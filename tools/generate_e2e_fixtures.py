@@ -27,8 +27,7 @@ FONT = {
 }
 
 
-def image():
-    width, height = 480, 260
+def image(width=480, height=260):
     pixels = bytearray([255] * width * height * 3)
 
     def pixel(x, y, rgb):
@@ -110,6 +109,9 @@ def main():
     args = parser.parse_args()
     FIXTURES.joinpath("shapes.png.base64").write_text(
         base64.b64encode(image()).decode() + "\n"
+    )
+    FIXTURES.joinpath("shapes.square.png.base64").write_text(
+        base64.b64encode(image(512, 512)).decode() + "\n"
     )
     if args.audio:
         FIXTURES.joinpath("shapes.wav.base64").write_text(

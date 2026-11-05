@@ -4,7 +4,7 @@ The same nonroot OCI image serves standalone Docker/Compose and Kubernetes. It
 defaults to HTTP on `0.0.0.0:8080`; `/mcp` is the MCP endpoint. Native binaries
 default to stdio. Incoming MCP authentication is deferred; deploy HTTP within the
 intended private network. Set `LLM_MCP_ALLOWED_HOSTS` for the actual service/ingress
-authorities and namespace. Probes report process health, not OpenAI availability,
+authorities and namespace. Probes report process health, not provider availability,
 and never consume model tokens.
 
 ## Standalone container
@@ -14,6 +14,9 @@ docker build -t llm-mcp:local .
 docker run --rm -p 127.0.0.1:8080:8080 -e OPENAI_API_KEY llm-mcp:local
 # Stdio: keep stdin open; do not allocate a TTY.
 docker run --rm -i -e OPENAI_API_KEY -e LLM_MCP_TRANSPORT=stdio llm-mcp:local
+# OpenRouter (OPENROUTER_API_KEY must already be exported):
+docker run --rm -p 127.0.0.1:8080:8080 -e LLM_MCP_PROVIDER=openrouter \
+  -e OPENROUTER_API_KEY llm-mcp:local
 # Or use the published image:
 docker compose -f deploy/compose/api-key.yaml up -d
 ```
@@ -32,6 +35,13 @@ Create Secret `llm-mcp-openai` with key `api-key` using your secret manager, the
 ```sh
 kubectl apply -f deploy/kubernetes/api-key.yaml
 ```
+
+For OpenRouter, adapt the API-key manifest: set `LLM_MCP_PROVIDER=openrouter`,
+replace `OPENAI_API_KEY` with `OPENROUTER_API_KEY`, and reference an OpenRouter
+Secret. Similarly, adapt Compose's API-key environment entry to
+`OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY}` and add provider
+selection. Each instance uses one provider; deploy separate instances for both.
+Use provider-matching catalogs and model IDs. [OpenRouter details](openrouter.md).
 
 The Deployment starts two replicas. Service ClientIP affinity keeps legacy MCP
 protocol sessions on one instance; ingress/load-balancer deployments must preserve
