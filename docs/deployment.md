@@ -52,12 +52,19 @@ a failed call is safe to retry. Runtime never retries provider calls automatical
 ## OAuth Kubernetes deployment
 
 1. Run `llm-mcp login` locally (see [OAuth](oauth.md)).
-2. Provision the `llm-mcp-oauth` PVC from the OAuth manifest and keep the Deployment
-   scaled to zero during credential import.
+2. Provision the `llm-mcp-oauth` PVC and Deployment from the OAuth manifest with
+   **replicas set to zero before applying it**. The checked-in manifest declares
+   one replica; applying it unchanged starts the server before import. For an
+   existing deployment, scale to zero and wait for its pods to terminate first.
 3. Create transfer Secret `llm-mcp-oauth-transfer` with key `auth.json` from the
    protected local credential file.
 4. Run `deploy/kubernetes/oauth-import.yaml` and wait for successful completion.
 5. Delete the transfer Secret, then start the OAuth Deployment at one replica.
+
+The [user guide's OAuth Kubernetes walkthrough](user-guide.md#kubernetes-with-oauth-bootstrap-in-the-right-order)
+includes a zero-replica bootstrap command and the complete import/start sequence.
+For reauthorization, run a fresh import Job with the server stopped; delete or
+wait for expiry of any previous completed Job before creating it again.
 
 The import job preserves/creates destination host identity and writes rotating
 state to `/state`. The OAuth Deployment uses `Recreate`, one replica, and a writable

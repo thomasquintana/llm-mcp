@@ -71,7 +71,12 @@ requirements, POSIX/PowerShell distinctions, and runnable versus illustrative la
 Use implementation as source of truth. Do not imply publication/model availability
 or historical verification proves present access. No application behavior changes.
 
-### Task 3 — documentation integration [pending]
+### Task 3 — documentation integration [completed]
+
+Added prominent README guide link and Unreleased entry. Updated release docs to
+describe automatic credential-gated live tests. Clarified zero-replica OAuth
+Kubernetes bootstrap and fresh import Jobs, with a direct guide link. Reviewed the
+four-file diff and passed `git diff --check`; no application/manifests changed.
 
 Add README entry point, Unreleased changelog entry, correct release testing text and
 OAuth bootstrap instructions. Keep links relative and preserve focused references.
@@ -103,3 +108,5 @@ the plan, commit and push that update too.
 - Task 1: branch and plan ready; starting Task 2 after the plan commit.
 - Task 2: guide draft complete. Reread the plan for alignment: every planned topic
   is present; next integrate README, changelog and the two focused corrections.
+- Task 3: integration complete. Reread plan; next validate runnable examples,
+  links/anchors, contracts and required checks before final review/publication.

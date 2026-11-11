@@ -74,6 +74,8 @@ and compared rather than overwritten. Changed release contents require a new
 version; do not move an existing release tag.
 
 Artifacts built on another OS and actual registry publication require their CI
-runners and repository permissions. Local tests use mock OpenAI endpoints and do
-not consume provider credentials. Real browser login and model-access checks are
-operator-initiated integration checks.
+runners and repository permissions. Deterministic tests use mock provider endpoints;
+ordinary Cargo test runs also automatically execute live OpenAI/OpenRouter suites
+when their credentials are available, consuming normal provider usage. See
+[testing](testing.md) for credential gates, deterministic-only filters and OAuth
+store ownership. Browser login remains operator-initiated.
