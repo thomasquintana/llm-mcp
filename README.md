@@ -3,6 +3,10 @@
 A Rust MCP server exposing OpenAI and OpenRouter through **`generate`**, **`classify`**, **`embed`**,
 and **`transcribe`**. Designed for HTLK, standalone containers, and Kubernetes.
 
+**Start with the [complete user guide](docs/user-guide.md)** for installation,
+provider/authentication setup, a first MCP call, tool tutorials, deployment, and
+troubleshooting. The quick reference below links to focused technical details.
+
 ## Install and run
 
 ```sh
