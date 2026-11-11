@@ -40,7 +40,14 @@ Created documentation branch from fetched main, confirmed clean working tree and
 GitHub authentication, saved this plan. No configuration files or credentials read.
 Verification: `git diff --stat HEAD origin/main` was empty before branching.
 
-### Task 2 — complete guide [pending]
+### Task 2 — complete guide [completed]
+
+Created `docs/user-guide.md` with all 16 navigable sections, three credential paths,
+complete curl MCP session, four tool tutorials, native provider differences, full
+configuration/CLI references, OAuth lifecycle, Docker/Compose/Kubernetes bootstrap,
+HTLK, troubleshooting, deterministic/live testing and upgrade procedures. Cross-
+checked the draft against the previously reviewed source and fixtures. Preliminary
+whitespace review passed; executable example/link checks remain Task 4.
 
 Write one navigable guide with these sections:
 1. Introduction, glossary concepts, architecture and capability matrix.
@@ -94,3 +101,5 @@ the plan, commit and push that update too.
 ## Progress / execution evidence
 
 - Task 1: branch and plan ready; starting Task 2 after the plan commit.
+- Task 2: guide draft complete. Reread the plan for alignment: every planned topic
+  is present; next integrate README, changelog and the two focused corrections.
