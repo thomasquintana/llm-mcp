@@ -127,16 +127,17 @@ Select the target for your operating system and CPU:
 
 Linux releases require **glibc 2.36 or newer**. macOS archives are unsigned.
 Verify the downloaded archive before extracting it. For example, replacing the
-placeholder with the actual archive filename:
+assignment below with the actual archive filename:
 
 ```sh
+ARCHIVE='replace-with-actual-archive.tar.gz'
 # Linux:
-sha256sum -c <archive>.sha256
+sha256sum -c "$ARCHIVE.sha256"
 # macOS:
-shasum -a 256 -c <archive>.sha256
+shasum -a 256 -c "$ARCHIVE.sha256"
 ```
 
-In PowerShell, use `Get-FileHash -Algorithm SHA256 <archive>` and compare the hash
+In PowerShell, use `Get-FileHash -Algorithm SHA256 'actual-archive.zip'` and compare the hash
 with the checksum file. Extract the archive, place the executable on `PATH`, then
 run `llm-mcp --version`. Archives also include the README and license notices.
 
@@ -318,6 +319,8 @@ SESSION='paste-the-returned-session-id'
 ```
 
 The body may be JSON or SSE with `data:` lines containing JSON-RPC messages.
+When writing a parser, ignore comment/empty data events and assemble each complete
+SSE event before parsing its JSON; a single HTTP chunk need not contain one event.
 
 **3. Finish initialization.**
 

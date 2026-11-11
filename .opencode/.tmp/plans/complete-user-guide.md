@@ -81,7 +81,44 @@ four-file diff and passed `git diff --check`; no application/manifests changed.
 Add README entry point, Unreleased changelog entry, correct release testing text and
 OAuth bootstrap instructions. Keep links relative and preserve focused references.
 
-### Task 4 — validation and refinements [pending]
+### Task 4 — validation and refinements [completed]
+
+Validation completed on macOS ARM64, Rust/Cargo 1.98.0. Refined archive checksum
+commands into copyable shell syntax and clarified empty SSE events/chunk assembly
+after executing the guide's exact curl commands. No application changes needed.
+
+Passing checks:
+- `cargo fmt --all --check`
+- `cargo clippy --all-targets --all-features --locked -- -D warnings`
+- `cargo test --all-features --locked -- --skip live_openai_ --skip live_openrouter_`
+  (77 deterministic regressions; 3 live suites explicitly filtered out)
+- `RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps --locked`
+- `CARGO_TARGET_DIR="$(mktemp -d /var/folders/gb/g744mwgj3nn6mtf4dgdg58p00000gn/T/opencode/llm-mcp-user-guide-package.XXXXXX)" cargo package --locked --allow-dirty`
+  (fresh independent compilation; 81 packaged files)
+- `python3 tools/check_notices.py`
+- `python3 tools/export_catalogs.py --check`
+- `uv run --with-requirements tools/requirements.txt ruff check tools`
+- `uv run --with-requirements tools/requirements.txt python -m unittest discover -s tools -p 'test_*.py'`
+  (12 Python regressions)
+- `git diff --check`
+
+One-off verification script lives outside the repo at
+`/var/folders/gb/g744mwgj3nn6mtf4dgdg58p00000gn/T/opencode/validate-llm-mcp-guide.py`.
+Ran with `uv run --with pyyaml --with jsonschema python3 <script>`: 15 JSON examples,
+70 local links/anchors, 35 shell blocks, argument examples against exported schemas,
+all 17 config/log variables, CLI help/version and six provider/auth/transport HTLK
+catalog combinations. Exact Kubernetes bootstrap produced PVC, zero-replica
+Deployment and Service. Exact five documented curl commands initialized, notified,
+discovered, generated, and deleted a real server session against a local mock;
+checked structured/text parity and one upstream call. No real credentials used.
+
+Nonpassing existing gate: `cargo deny check` fails RUSTSEC-2026-0462 against locked
+rmcp 3.7.0 (advisory describes built-in Streamable HTTP client response buffering).
+Cargo.toml/Cargo.lock match origin/main exactly; dependency updates are outside
+this documentation task. Existing duplicate-version/unused-license warnings also
+remain. Record the audit failure explicitly in the PR/final report. Notices and
+catalogs were run separately after the audit stopped its command chain and passed.
+No live cluster, provider or new image build is claimed by these docs checks.
 
 Validate links/anchors and JSON examples; exercise the documented MCP HTTP sequence
 against a local mock provider and compare CLI help/catalog behavior. Inspect all
@@ -110,3 +147,6 @@ the plan, commit and push that update too.
   is present; next integrate README, changelog and the two focused corrections.
 - Task 3: integration complete. Reread plan; next validate runnable examples,
   links/anchors, contracts and required checks before final review/publication.
+- Task 4: verification and refinements complete, including recorded baseline
+  audit failure. Reread plan: all guide/integration criteria covered; next review
+  all commits/base diff, commit this evidence, push, and open the PR.
