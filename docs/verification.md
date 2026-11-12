@@ -27,7 +27,10 @@ Local verification on macOS ARM64 with Rust **1.98.0**:
   continuation over both transports with local mock providers.
 
 No real provider credentials or live cluster deployment were used for this repair.
-Cross-platform CI results are recorded after the repair PR checks complete.
+All seven jobs pass in [repair PR #11](https://github.com/thomasquintana/llm-mcp/pull/11)
+[CI run 43135698022](https://github.com/thomasquintana/llm-mcp/actions/runs/43135698022)
+for `3ba04da`: Linux/macOS/Windows Rust checks, Rust 1.98 MSRV, dependency policy
+and clean packaging, deployment/container smoke checks, and coverage.
 
 ## OpenRouter CI repair verification
 
