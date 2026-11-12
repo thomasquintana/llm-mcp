@@ -38,7 +38,14 @@ tests cover main contracts; add regressions only if a concrete gap/failure emerg
 Fetched current main, confirmed clean workspace, created the branch from c849060.
 Reviewed CONTRIBUTING and prior guide verification. Save/commit this plan.
 
-### 2. Targeted SDK upgrade and compatibility — pending
+### 2. Targeted SDK upgrade and compatibility — completed
+
+Raised requirement to 3.9 and resolved exactly 3.9.0. No unrelated package version
+changes; rmcp adds a sha2 dependency already in this graph. Regenerated notices
+(only rmcp version label changed), added changelog entry. No application source or
+catalog changes required. All 77 deterministic Rust tests pass on Rust 1.98 with
+three live suites filtered out. `cargo deny check` passes (existing license and
+duplicate-version warnings only); notices and six catalog drift checks pass.
 
 - Change Cargo.toml rmcp lower bound from 3.7 to 3.9, keeping selected features.
 - `cargo update -p rmcp --precise 3.9.0`; inspect all lockfile changes.
@@ -69,3 +76,6 @@ Reviewed CONTRIBUTING and prior guide verification. Save/commit this plan.
 ## Execution evidence
 
 - Task 1 complete: starting targeted dependency update after this plan commit.
+- Task 2 complete: reread plan for alignment. The advisory is resolved without
+  policy exceptions, wire contracts unchanged. Next run the remaining required
+  checks and actual container/integration verification before opening the PR.
