@@ -54,7 +54,25 @@ duplicate-version warnings only); notices and six catalog drift checks pass.
 - Make only necessary compatibility fixes, preserving protocol/exports and limits.
 - Update/read this plan and commit the completed task.
 
-### 3. Full local verification and evidence — pending
+### 3. Full local verification and evidence — completed
+
+Passed remaining CONTRIBUTING checks on macOS ARM64 / Rust 1.98.0: fmt, all-target
+all-feature denied-warning Clippy, denied-warning rustdoc, clean fresh-target cargo
+package (81 files), coverage with live suites filtered out (88.67% lines), Ruff,
+12 Python tooling tests and actionlint. `cargo deny --log-level error check`
+explicitly confirms advisories/bans/licenses/sources all OK. Notices and catalogs
+were already checked after the targeted update; no new dependency/source changes.
+
+Built `llm-mcp:rmcp-audit-repair` with the unchanged Dockerfile/pinned Rust 1.98.
+Registry metadata lookups took several minutes; combined build+smoke hit the
+600-second wrapper deadline after the smoke success message. Standalone rerun
+`python3 tools/container_smoke.py --image llm-mcp:rmcp-audit-repair` exited cleanly
+with all assertions passing; no test containers/volumes remain. Both Compose
+configs validated with `--env-file /dev/null` and a dummy key. Pinned kubeconform
+0.7.0 validated all six resources. `tools/check_htlk.py` passed the actual sibling
+HTLK workflow and continuation over both transports with sanitized auth/provider
+environment and local mock providers. Added current evidence in docs/verification.md.
+No new regression tests/source fixes were needed; existing coverage is sufficient.
 
 - Formatting, all-target/all-feature denied-warning Clippy, deterministic tests,
   denied-warning rustdoc, fresh-target independent cargo package verification.
@@ -79,3 +97,6 @@ duplicate-version warnings only); notices and six catalog drift checks pass.
 - Task 2 complete: reread plan for alignment. The advisory is resolved without
   policy exceptions, wire contracts unchanged. Next run the remaining required
   checks and actual container/integration verification before opening the PR.
+- Task 3 complete: reread plan. All planned local checks passed, including actual
+  container and HTLK execution. Next commit evidence, review every branch commit
+  and base diff, open the PR, and wait for all seven CI jobs to pass.

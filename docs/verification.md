@@ -1,5 +1,34 @@
 # v0.1 acceptance evidence
 
+## rmcp security-advisory CI repair
+
+The guide merge's [main CI run](https://github.com/thomasquintana/llm-mcp/actions/runs/43119190461)
+failed only the dependency-policy job on RUSTSEC-2026-0462 for rmcp 3.7.0.
+The targeted update raises the SDK requirement to 3.9 and locks 3.9.0, the first
+patched release. No other package versions changed; generated notices only update
+the rmcp version label. No advisory exceptions or application changes were needed.
+
+Local verification on macOS ARM64 with Rust **1.98.0**:
+
+- `cargo deny check` passes all four categories; existing duplicate-version and
+  unused-license-allowance warnings remain. Generated notices and all six
+  provider/auth/transport catalog checks pass; MCP remains **2025-11-25**.
+- **77 deterministic Rust regressions** pass, including independent stdio/HTTP
+  contracts, cancellation, shutdown, payload bounds and OAuth isolation. All three
+  live suites were explicitly filtered out. Formatting, warnings-denied all-target
+  Clippy and rustdoc pass; production line coverage is **88.67%**.
+- Clean `cargo package --locked` verification compiles the staged crate in a fresh
+  target directory. Ruff, **12 Python tooling tests**, and actionlint pass.
+- The actual Linux ARM64 container builds with the pinned Rust 1.98 toolchain and
+  passes API-key tools, OAuth-only generation, graceful termination, credential
+  import and remount permission-repair smoke checks. Both Compose configurations
+  validate; pinned kubeconform 0.7.0 validates all six Kubernetes resources.
+- The sibling HTLK compiler/runtime passes the four-tool workflow and function
+  continuation over both transports with local mock providers.
+
+No real provider credentials or live cluster deployment were used for this repair.
+Cross-platform CI results are recorded after the repair PR checks complete.
+
 ## OpenRouter CI repair verification
 
 All seven jobs pass in [CI run 41953459099](https://github.com/thomasquintana/llm-mcp/actions/runs/41953459099)
