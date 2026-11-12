@@ -4,6 +4,9 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Upgrade rmcp to 3.9.0 to resolve RUSTSEC-2026-0462 and restore the CI dependency
+  advisory gate while retaining MCP 2025-11-25 compatibility.
+
 - Add a complete human-readable user guide with first-call walkthroughs, all four
   tool tutorials, provider/authentication differences, configuration, deployment,
   troubleshooting and upgrades; clarify OAuth Kubernetes bootstrap and live-test behavior.
