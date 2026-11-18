@@ -19,7 +19,7 @@ harness = false
 axum = "0.8"
 base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
-jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "form", "multipart"] }
 rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
