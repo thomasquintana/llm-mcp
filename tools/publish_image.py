@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Publish tested native images, refusing replacement of an existing version."""
 
+import json
 import os
 import re
 import subprocess
-import json
 from pathlib import Path
 
 from release import loaded_image_contents, verify_receipt
@@ -13,6 +13,7 @@ from release import loaded_image_contents, verify_receipt
 def digest(image):
     result = subprocess.run(
         ["docker", "buildx", "imagetools", "inspect", image],
+        check=False,
         capture_output=True,
         text=True,
         timeout=90,

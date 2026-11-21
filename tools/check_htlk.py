@@ -3,18 +3,18 @@
 
 import argparse
 import base64
-from email import policy
-from email.parser import BytesParser
 import http.server
 import json
 import os
-from pathlib import Path
 import socket
 import subprocess
 import tempfile
 import threading
 import time
 import urllib.request
+from email import policy
+from email.parser import BytesParser
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -14,12 +14,14 @@ class ImageTests(unittest.TestCase):
             "connection timed out",
             "credential token not found",
         ):
-            with patch(
-                "subprocess.run",
-                return_value=subprocess.CompletedProcess([], 1, "", message),
+            with (
+                patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], 1, "", message),
+                ),
+                self.assertRaises(RuntimeError),
             ):
-                with self.assertRaises(RuntimeError):
-                    publish_image.digest("registry/image:1.2.3")
+                publish_image.digest("registry/image:1.2.3")
         with patch(
             "subprocess.run",
             return_value=subprocess.CompletedProcess([], 1, "", "manifest unknown"),
@@ -75,11 +77,13 @@ class ImageTests(unittest.TestCase):
                     alias.assert_not_called()
 
     def test_resumed_registry_image_must_match_original_receipt(self):
-        with patch("publish_image.remote_config", return_value="changed-image"):
-            with self.assertRaises(ValueError):
-                publish_image.verify_remote(
-                    "image@digest", {"amd64": {"config_id": "original-image"}}
-                )
+        with (
+            patch("publish_image.remote_config", return_value="changed-image"),
+            self.assertRaises(ValueError),
+        ):
+            publish_image.verify_remote(
+                "image@digest", {"amd64": {"config_id": "original-image"}}
+            )
 
     def test_fresh_publication_checks_native_configs_and_creates_commit_before_version(
         self,

@@ -2,12 +2,12 @@
 """Version validation and binary archives shared by release CI and local dry runs."""
 
 import argparse
-import hashlib
 import gzip
+import hashlib
 import json
 import os
-from pathlib import Path
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -15,7 +15,7 @@ import tomllib
 import urllib.error
 import urllib.request
 import zipfile
-import shutil
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
@@ -76,10 +76,10 @@ def archive(binary, target, output, package_version):
         with (
             path.open("wb") as raw,
             gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed,
+            tarfile.open(fileobj=compressed, mode="w") as bundle,
         ):
-            with tarfile.open(fileobj=compressed, mode="w") as bundle:
-                for source, name in files:
-                    bundle.add(source, arcname=f"{prefix}/{name}", filter=normalize)
+            for source, name in files:
+                bundle.add(source, arcname=f"{prefix}/{name}", filter=normalize)
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()
     path.with_name(f"{path.name}.sha256").write_text(
         f"{checksum}  {path.name}\n", newline="\n"
@@ -112,6 +112,7 @@ def release_assets(tag):
     repo = os.environ["GITHUB_REPOSITORY"]
     result = subprocess.run(
         ["gh", "api", f"repos/{repo}/releases/tags/{tag}"],
+        check=False,
         capture_output=True,
         text=True,
     )
