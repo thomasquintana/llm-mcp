@@ -4,11 +4,11 @@
 import argparse
 import base64
 import io
-from pathlib import Path
 import struct
 import subprocess
 import wave
 import zlib
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -82,8 +82,10 @@ def speech():
             DEBIAN,
             "sh",
             "-ec",
-            "apt-get update -qq >&2; apt-get install --no-install-recommends -y espeak-ng >&2; "
-            'espeak-ng --stdout -v en-us -s 145 "$1"',
+            (
+                "apt-get update -qq >&2; apt-get install --no-install-recommends -y espeak-ng >&2; "
+                'espeak-ng --stdout -v en-us -s 145 "$1"'
+            ),
             "fixture",
             SENTENCE,
         ]

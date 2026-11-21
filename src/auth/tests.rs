@@ -446,7 +446,7 @@ async fn validates_rsa_signature_issuer_audience_nonce_expiry_and_subject() {
     let wrong = jsonwebtoken::encode(
         &jsonwebtoken::Header::new(Algorithm::HS256),
         &claims,
-        &jsonwebtoken::EncodingKey::from_secret(b"wrong"),
+        &jsonwebtoken::EncodingKey::from_secret(b"wrong").unwrap(),
     )
     .unwrap();
     assert!(

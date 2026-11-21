@@ -1,8 +1,8 @@
 """Deployment invariants that schema validation alone cannot establish."""
 
-from pathlib import Path
 import tomllib
 import unittest
+from pathlib import Path
 
 import yaml
 

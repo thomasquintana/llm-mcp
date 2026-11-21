@@ -1,16 +1,16 @@
 """Regression coverage for irreversible publishing boundaries and archive contents."""
 
+import gzip
 import hashlib
-from pathlib import Path
+import io
+import json
 import tarfile
 import tempfile
 import unittest
-import zipfile
-from unittest.mock import patch
 import urllib.error
-import io
-import json
-import gzip
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
 
 import release
 

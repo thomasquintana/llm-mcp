@@ -4,6 +4,10 @@ All notable changes follow Semantic Versioning.
 
 ## Unreleased
 
+- Update `jsonwebtoken` to 12.0.0, `rmcp` to 3.10.0, `uuid` to 1.29.2, and
+  `aws-lc-rs` to 1.19.0. Refresh the pinned Rust 1.100 and Debian Bookworm container
+  images, GitHub Actions, and Ruff 0.17.5. The minimum supported Rust version remains 1.98.
+
 - Upgrade rmcp to 3.9.0 to resolve RUSTSEC-2026-0462 and restore the CI dependency
   advisory gate while retaining MCP 2025-11-25 compatibility.
 

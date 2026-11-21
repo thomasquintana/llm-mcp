@@ -3,7 +3,9 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "Unmaintained-only advisory for transitive chrono; remove when a released rmcp can build without chrono (https://github.com/modelcontextprotocol/rust-sdk/pull/1474)." },
+]
 
 [licenses]
 allow = ["Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "MIT", "MIT-0", "Unicode-3.0", "Unlicense", "Zlib"]

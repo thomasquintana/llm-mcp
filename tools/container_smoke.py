@@ -257,6 +257,7 @@ def main():
                 "auth",
                 "status",
             ],
+            check=False,
             capture_output=True,
         )
         assert rejected.returncode != 0, "group-readable credentials must be rejected"
